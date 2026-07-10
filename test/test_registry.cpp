@@ -1,5 +1,7 @@
 #include "pl_test.h"
 
+#include <cstring>
+
 #include "../core/pl_registry.h"
 
 using namespace pulselink;  // NOLINT
@@ -78,4 +80,114 @@ PL_TEST_CASE(ram_storage_survives_across_registry_instances) {
   PL_ASSERT(e != nullptr);
   PL_ASSERT(e->sleep_profile == SleepProfile::kWakeAndPoll);
   PL_ASSERT(e->last_seen_ticks == 42);
+}
+
+PL_TEST_CASE(unmapped_field_name_is_not_found) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, 0);
+  PL_ASSERT(reg.find_field_name(static_cast<uint8_t>(id), 1) == nullptr);
+}
+
+PL_TEST_CASE(set_field_name_provisions_and_finds_it) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, 0);
+  uint8_t device_id = static_cast<uint8_t>(id);
+  PL_ASSERT(reg.set_field_name(device_id, 1, "temperature"));
+
+  const char* name = reg.find_field_name(device_id, 1);
+  PL_ASSERT(name != nullptr);
+  PL_ASSERT(strcmp(name, "temperature") == 0);
+}
+
+PL_TEST_CASE(set_field_name_updates_an_existing_mapping) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, 0);
+  uint8_t device_id = static_cast<uint8_t>(id);
+  reg.set_field_name(device_id, 1, "temp_c");
+  reg.set_field_name(device_id, 1, "temperature");
+
+  PL_ASSERT(strcmp(reg.find_field_name(device_id, 1), "temperature") == 0);
+}
+
+PL_TEST_CASE(set_field_name_truncates_names_longer_than_the_buffer) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, 0);
+  uint8_t device_id = static_cast<uint8_t>(id);
+  // 20 chars, longer than PULSELINK_MAX_FIELD_NAME_LEN (16) can hold with
+  // a NUL terminator — must truncate cleanly, not overflow.
+  reg.set_field_name(device_id, 1, "temperature_celsius");
+
+  const char* name = reg.find_field_name(device_id, 1);
+  PL_ASSERT(strlen(name) == PULSELINK_MAX_FIELD_NAME_LEN - 1);
+  PL_ASSERT(strncmp(name, "temperature_celsius", PULSELINK_MAX_FIELD_NAME_LEN - 1) ==
+            0);
+}
+
+PL_TEST_CASE(set_field_name_fails_for_unknown_device_id) {
+  Registry reg;
+  PL_ASSERT(!reg.set_field_name(0, 1, "x"));
+}
+
+PL_TEST_CASE(node_within_timeout_is_not_reported_offline) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, /*now=*/0);
+  PL_ASSERT(!reg.check_offline_transition(static_cast<uint8_t>(id),
+                                           PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS - 1));
+}
+
+PL_TEST_CASE(node_past_timeout_is_reported_offline_exactly_once) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, /*now=*/0);
+  uint8_t device_id = static_cast<uint8_t>(id);
+  uint32_t stale = PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS;
+
+  PL_ASSERT(reg.check_offline_transition(device_id, stale));
+  PL_ASSERT(!reg.check_offline_transition(device_id, stale + 1));  // already reported
+}
+
+PL_TEST_CASE(touch_after_offline_report_signals_back_online) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, 0);
+  uint8_t device_id = static_cast<uint8_t>(id);
+  reg.check_offline_transition(device_id, PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS);
+
+  PL_ASSERT(reg.touch(kMacA, PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS + 10));
+  PL_ASSERT(!reg.touch(kMacA, PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS + 11));  // no repeat
+}
+
+PL_TEST_CASE(rejoin_also_clears_the_offline_flag) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, 0);
+  uint8_t device_id = static_cast<uint8_t>(id);
+  reg.check_offline_transition(device_id, PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS);
+
+  reg.add_or_update(kMacA, SleepProfile::kAlwaysOn,
+                     PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS + 10);
+  PL_ASSERT(!reg.touch(kMacA, PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS + 11));
+}
+
+PL_TEST_CASE(reload_picks_up_entries_written_after_construction) {
+  // Simulates gateway.ino's NVS sequencing fix: a Registry constructed
+  // before its storage backend was actually ready (empty read) still
+  // picks up the real data once reload() is called after the backend
+  // becomes ready.
+  RamRegistryStorage storage;
+  Registry reg(&storage);  // storage is empty at this point
+  PL_ASSERT(reg.size() == 0);
+
+  // Something else writes real data to the same backend...
+  RegistryEntry entries[1];
+  entries[0].valid = true;
+  memcpy(entries[0].mac, kMacA, 6);
+  entries[0].device_id = 3;
+  entries[0].sleep_profile = SleepProfile::kAlwaysOn;
+  entries[0].last_seen_ticks = 7;
+  entries[0].field_count = 0;
+  entries[0].reported_offline = false;
+  storage.save(entries, 1);
+
+  PL_ASSERT(reg.size() == 0);  // reg doesn't know yet
+  reg.reload();
+  PL_ASSERT(reg.size() == 1);
+  PL_ASSERT(reg.find_by_mac(kMacA) != nullptr);
 }

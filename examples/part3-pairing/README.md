@@ -24,16 +24,21 @@ fallback.
   `PULSELINK_MAX_UNICAST_FAILURES` consecutive failures trigger
   re-discovery, and shows the node successfully rejoining.
 
-NVS read/write in the `.ino` files is pseudocode (commented out) — the
-byte layout it would persist is `NodePairingState::serialize()`, which
+NVS read/write in `node_join.ino` is pseudocode (commented out) — the byte
+layout it would persist is `NodePairingState::serialize()`, which
 `test/test_join.cpp` round-trips through a buffer to prove it survives a
-simulated reboot. Real flash I/O, and the NVS-backed `RegistryStorage` on
-the gateway side, land in Phase 4 hardware bring-up (PLAN.md).
+simulated reboot. Real flash I/O landed on the gateway side once
+`gateway/pl_nvs_registry_storage.h` was written (Phase 4) — see
+`gateway/README.md`; node-side NVS is still pseudocode here since node
+firmware itself is Phase 5.
 
 The join protocol logic (`core/pl_join.h`, `core/pl_registry.h`) is fully
 covered by `test/test_join.cpp`, `test/test_registry.cpp`, and
 `test/test_join_flow.cpp` — including the provisioning-token check,
 join-spam rate limiting, and the channel-change-recovery scenario above.
+Both `.ino` files also syntax-check clean with `g++ -fsyntax-only` against
+stub Arduino/ESP-NOW headers (see `gateway/README.md` for what that does
+and doesn't prove).
 
 Article artifact — keep it minimal and readable, it appears in print
 (CLAUDE.md).

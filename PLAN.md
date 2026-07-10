@@ -59,26 +59,31 @@ pulselink/
 
 ## Phase 3 — Command table + reliability core (→ Part 5 logic, tested early)
 
-- [ ] `pl_cmdtable.h`: PENDING→SENT→ACKED/FAILED, retries in calling state (Pattern 8), deadlines
-- [ ] Two-loop ack model: fake MAC-ack vs app-ack, including "MAC-ack lies for broadcast" case
-- [ ] Node cmd_id dedupe (re-ack without re-execute)
-- [ ] Sleep-profile mailbox: hold CMD for WAKE_AND_POLL node, deliver in listen window (simulated timing)
-- [ ] CMD_ACK result-code enum end to end; NACK path
-- [ ] Tests: every failure mode in TRD §7 that the fake transport can express (1–8 except real-RF aspects)
+- [x] `pl_cmdtable.h`: PENDING→SENT→ACKED/FAILED, retries in calling state (Pattern 8), deadlines
+- [x] Two-loop ack model: fake MAC-ack vs app-ack, including "MAC-ack lies for broadcast" case (broadcast case covered in Phase 1's `test_fake_transport.cpp`; Phase 3 adds the CMD/CMD_ACK-specific MAC-ack-vs-app-ack test)
+- [x] Node cmd_id dedupe (re-ack without re-execute)
+- [x] Sleep-profile mailbox: hold CMD for WAKE_AND_POLL node, deliver in listen window (simulated timing)
+- [x] CMD_ACK result-code enum end to end; NACK path
+- [x] Tests: TRD §7 failure modes 1, 3, 4, 5, 6, 7, 8 (modes covered across Phases 1-3). Mode 2 (broker down → Degraded spool) needs the MQTT/HSM gateway machinery and is deferred to Phase 4; it isn't a real-RF gap, just a not-yet-built-one.
 
 **Exit:** all protocol logic proven off-target. This is the series' "we test embedded protocol logic on the desktop" showpiece.
 
 ## Phase 4 — Gateway firmware + Wokwi + hardware bring-up (→ Part 4) **[hardware starts]**
 
-- [ ] `espnow/` transport backend; `WIFI_PS_NONE`; unicast peer management
-- [ ] Gateway PulseHSM machine: Connected{Bridging, Draining} / Degraded superstates; bounded spool; refuse-with-reason
-- [ ] MQTT integration: publish `pulsecore/{tenant}/{device_id}/{field}`, subscribe `.../cmd`, publish `cmd_status` + health metrics (overflow counter, per-node loss rate, offline events)
-- [ ] NVS registry backend
-- [ ] Wokwi project: gateway + 2 nodes end-to-end against local Mosquitto
-- [ ] Hardware rig: 3 devkits + Mosquitto (Docker) + PulseDash pointed at it
-- [ ] Record Part 4 demo: live nodes on a PulseDash dashboard
+- [x] `espnow/` transport backend; `WIFI_PS_NONE`; unicast peer management (`transport/espnow/pl_espnow_transport.h` — written and syntax-checked against stub headers, D-014's bounded-wait MAC-ack design; genuinely unverified against real hardware, no ESP32 toolchain in this environment)
+- [x] Gateway HSM: Connected{Bridging, Draining} / Degraded superstates; bounded spool; refuse-with-reason (`core/pl_gateway_hsm.h` — hand-rolled stand-in for PulseHSM, D-013)
+- [x] MQTT integration, publish side: `pulsecore/{tenant_id}/{device_id}/{field}` topic mapping (`core/pl_topics.h`), pluggable `MqttClient` (`core/pl_mqtt.h`) with a fake backend for host tests (`transport/fake/pl_fake_mqtt.h`) and validated against a real Mosquitto broker (`examples/part4-gateway/host_bridge_demo.cpp`)
+- [x] MQTT integration, subscribe side (basic): `.../cmd` subscribe + receive proven against a real broker in the same demo
+- [x] `cmd_status` publish (`core/pl_cmd_status.h`: `format_cmd_status()` — delivered result code or "failed", the same `.../cmd_status` topic PulseDash already reads from)
+- [x] Health metrics: per-node loss rate from seq gaps (`core/pl_loss_tracker.h`'s `SeqLossTracker`, published as a `loss_rate` field), node liveness / offline+online events (`pl_registry.h`'s `check_offline_transition()`/`touch()`, published as an `online` field), gateway-wide ring overflow counter (`build_gateway_topic()` — TRD.md doesn't name a topic for gateway-wide metrics, since they have no device_id; this fills that gap with a `pulsecore/{tenant}/gateway/{field}` convention)
+- [x] NVS registry backend (`gateway/pl_nvs_registry_storage.h` via Arduino `Preferences`; RAM backend is still what host tests exercise directly). Writing this surfaced a real bug worth flagging: `Registry`'s constructor eagerly loads from storage, but as a global object it would construct *before* `setup()` runs — i.e. before `Preferences::begin()`. Fixed with an explicit `Registry::reload()`, called from `gateway.ino`'s `setup()` after `g_prefs.begin()`; covered by a new host test.
+- [x] `gateway/gateway.ino`: the full orchestration sketch — join handling, uplink dedupe/loss-tracking/field-bridging, downlink routing (new `parse_cmd_topic_device_id()` recovers device_id from a subscribed `.../cmd` topic), ALWAYS_ON retry polling vs. WAKE_AND_POLL listen-window delivery, health metrics, HSM-gated publish/spool throughout. `gateway/pl_pubsubclient_mqtt.h` is the real `MqttClient` backend (`PubSubClient`). All four `.ino` files in the repo (this one plus Parts 2-3's) syntax-check clean (`g++ -fsyntax-only`, zero warnings) against hand-written Arduino/ESP-NOW stub headers — real, but bounded: catches syntax/type errors against our own headers, not wrong real API signatures or hardware behavior. See `gateway/README.md` for exactly what is and isn't verified.
+- [x] `node/node.ino`: the ALWAYS_ON node counterpart to `gateway.ino` — join, periodic DATA send, CMD receive/execute/ack with dedupe, real NVS pairing persistence. Uses `EspNowTransport` for a correct MAC-ack, fixing `examples/part3-pairing/node_join.ino`'s earlier flagged simplification now that D-014's real fix exists.
+- [~] Wokwi project — `wokwi/single-board/`: confirmed (by the user, running Wokwi directly) that Wokwi does not support different firmware on multiple boards in one project, so the original two-board `gateway-node/` attempt was removed. Rebuilt as gateway + node combined on **one** simulated ESP32, connected by `transport/fake/pl_fake_transport.h`'s `FakeMedium`/`FakeTransport` — the same in-process fake medium 127 host-native tests already use — in place of real ESP-NOW, since `Transport` is an interface and swapping backends is a type change, not a logic change. WiFi and MQTT stay real (`Wokwi-GUEST` + `test.mosquitto.org`), which is the part this setup can actually add beyond what host-native tests already prove. Syntax-checks clean. Writing it surfaced a real bug in the already-pushed `gateway.ino`: nothing ever called `Registry::set_field_name()`, so DATA fields would never actually have been published — 127 tests missed it because they provision the field map directly in test setup, bypassing the join path. Fixed in both `gateway.ino` and the combined sketch; see `wokwi/single-board/README.md`. **Not yet run in Wokwi itself** — that's the next concrete step, now unblocked.
+- [ ] Hardware rig: 3 devkits + Mosquitto (Docker) + PulseDash pointed at it (needs physical boards + your local network)
+- [ ] Record Part 4 demo: live nodes on a PulseDash dashboard (depends on the hardware rig above)
 
-**Exit:** end-to-end demo on real boards. Part 4 draftable.
+**Exit:** end-to-end demo on real boards. Part 4 draftable. Everything that can be built and proven without physical hardware now is; what remains needs devkits, your local network, and running the Wokwi project to completion — that last one is ready but unconfirmed, since it needs a live wokwi.com session this environment doesn't have.
 
 ## Phase 5 — Real-RF validation + sleep (→ Part 5 complete)
 

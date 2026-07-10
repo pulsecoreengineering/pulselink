@@ -1,8 +1,15 @@
 # wokwi
 
-Wokwi web-simulator projects: multi-ESP32 integration checks (gateway + 2
-nodes) against simulated ESP-NOW and a local/public MQTT broker. Radio is
-idealized here — not an RF testbed (TRD.md §9, D-009).
+Wokwi web-simulator projects. Radio is idealized here — not an RF testbed
+(TRD.md §9, D-009).
 
-Built in Phase 4 (PLAN.md): gateway + 2 nodes end-to-end against local
-Mosquitto.
+- `single-board/` — gateway + node combined on one simulated ESP32,
+  connected by the same in-process fake ESP-NOW medium the host-native
+  tests use (real ESP-NOW isn't simulated — see that project's README for
+  why and what this does/doesn't prove). WiFi and MQTT are real.
+
+An earlier `gateway-node/` attempt assumed Wokwi supported different
+firmware on two boards in one project; it doesn't (confirmed, not
+assumed), so that project was removed in favor of `single-board/`.
+
+Built in Phase 4 (PLAN.md).
