@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host-native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --warn-uninitialized
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Heap tripwire (core/ + transport/ must stay zero-heap)
+        run: |
+          if grep -RnE '(^|[^A-Za-z0-9_])(new |malloc\(|\bString\b)' core/ transport/ \
+              --include='*.h' --include='*.hpp' --include='*.cpp'; then
+            echo "::error::Found malloc/new/String in core/ or transport/ (zero-heap contract, CLAUDE.md)"
+            exit 1
+          fi
+          echo "Heap tripwire clean."
