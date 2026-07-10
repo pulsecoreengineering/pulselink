@@ -102,6 +102,35 @@ inline uint8_t build_gateway_topic(const char* tenant_id, const char* field,
   return pos;
 }
 
+// Inverse of build_cmd_topic(): the gateway subscribes to a wildcard
+// (e.g. "pulsecore/{tenant_id}/+/cmd") and needs to recover which node a
+// received message targets. Returns the device_id, or -1 if `topic`
+// doesn't match "pulsecore/{tenant_id}/{device_id}/cmd" — wrong tenant,
+// wrong suffix, or a non-numeric/out-of-range device_id segment.
+inline int parse_cmd_topic_device_id(const char* tenant_id, const char* topic) {
+  char prefix[PULSELINK_MAX_TOPIC_LEN];
+  uint8_t pos = 0;
+  if (!detail::append(prefix, sizeof(prefix), &pos, "pulsecore/")) return -1;
+  if (!detail::append(prefix, sizeof(prefix), &pos, tenant_id)) return -1;
+  if (!detail::append(prefix, sizeof(prefix), &pos, "/")) return -1;
+  prefix[pos] = '\0';
+
+  size_t prefix_len = strlen(prefix);
+  if (strncmp(topic, prefix, prefix_len) != 0) return -1;
+
+  const char* rest = topic + prefix_len;  // "{device_id}/cmd"
+  int device_id = 0;
+  int digits = 0;
+  while (rest[digits] >= '0' && rest[digits] <= '9') {
+    device_id = device_id * 10 + (rest[digits] - '0');
+    ++digits;
+    if (device_id > 255) return -1;  // device_id is a uint8_t on the wire
+  }
+  if (digits == 0) return -1;
+  if (strcmp(rest + digits, "/cmd") != 0) return -1;
+  return device_id;
+}
+
 }  // namespace pulselink
 
 #endif  // PULSELINK_CORE_PL_TOPICS_H

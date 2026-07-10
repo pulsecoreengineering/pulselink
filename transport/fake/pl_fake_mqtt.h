@@ -30,7 +30,12 @@ class FakeMqttClient : public MqttClient {
     uint16_t payload_len;
   };
 
-  FakeMqttClient() : connected_(true), publish_count_(0), inbound_count_(0) {}
+  FakeMqttClient()
+      : connected_(true),
+        publish_count_(0),
+        inbound_head_(0),
+        inbound_tail_(0),
+        inbound_count_(0) {}
 
   void set_connected(bool connected) { connected_ = connected; }
 
@@ -54,8 +59,10 @@ class FakeMqttClient : public MqttClient {
 
   bool receive(char* out_topic, uint16_t topic_cap, uint8_t* out_payload,
                uint16_t payload_cap, uint16_t* out_payload_len) override {
-    if (inbound_head_ >= inbound_count_) return false;
-    const Published& p = inbound_[inbound_head_++];
+    if (inbound_count_ == 0) return false;
+    const Published& p = inbound_[inbound_head_];
+    inbound_head_ = (inbound_head_ + 1) % kMaxQueuedInbound;
+    --inbound_count_;
 
     uint16_t topic_len = static_cast<uint16_t>(strlen(p.topic));
     if (topic_len >= topic_cap || p.payload_len > payload_cap) return false;
@@ -67,11 +74,16 @@ class FakeMqttClient : public MqttClient {
   }
 
   // Test-only helper: queues a message as if it had arrived on a
-  // subscribed topic, for receive() to hand back.
+  // subscribed topic, for receive() to hand back. Ring buffer, not a
+  // flat array — a test (or gateway code exercising this over many
+  // iterations) can inject and drain more than kMaxQueuedInbound
+  // messages over its lifetime, not just kMaxQueuedInbound ever.
   void inject_inbound(const char* topic, const uint8_t* payload,
                        uint16_t payload_len) {
-    if (inbound_count_ >= kMaxQueuedInbound) return;
-    Published& p = inbound_[inbound_count_++];
+    if (inbound_count_ >= kMaxQueuedInbound) return;  // drop: queue full
+    Published& p = inbound_[inbound_tail_];
+    inbound_tail_ = (inbound_tail_ + 1) % kMaxQueuedInbound;
+    ++inbound_count_;
     strncpy(p.topic, topic, PULSELINK_MAX_TOPIC_LEN - 1);
     p.topic[PULSELINK_MAX_TOPIC_LEN - 1] = '\0';
     memcpy(p.payload, payload, payload_len);
@@ -86,8 +98,9 @@ class FakeMqttClient : public MqttClient {
   Published log_[kMaxLoggedPublishes];
   int publish_count_;
   Published inbound_[kMaxQueuedInbound];
+  int inbound_head_;
+  int inbound_tail_;
   int inbound_count_;
-  int inbound_head_ = 0;
 };
 
 }  // namespace fake

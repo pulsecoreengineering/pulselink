@@ -38,3 +38,29 @@ PL_TEST_CASE(injected_inbound_message_is_returned_by_receive) {
   PL_ASSERT(!client.receive(topic, sizeof(topic), out_payload, sizeof(out_payload),
                              &out_len));
 }
+
+PL_TEST_CASE(inbound_queue_wraps_past_its_capacity_over_time) {
+  // Regression test: the inbound queue is a ring buffer, not a flat array
+  // that permanently runs out of room after kMaxQueuedInbound messages
+  // ever pass through it (that was a real bug caught while writing the
+  // gateway's PubSubClient backend — this file's queue is the same shape).
+  FakeMqttClient client;
+  char topic[64];
+  uint8_t out_payload[64];
+  uint16_t out_len;
+
+  for (int round = 0; round < 3; ++round) {
+    for (int i = 0; i < FakeMqttClient::kMaxQueuedInbound; ++i) {
+      uint8_t payload[1] = {static_cast<uint8_t>(i)};
+      client.inject_inbound("t", payload, 1);
+    }
+    for (int i = 0; i < FakeMqttClient::kMaxQueuedInbound; ++i) {
+      PL_ASSERT(client.receive(topic, sizeof(topic), out_payload,
+                                sizeof(out_payload), &out_len));
+      PL_ASSERT(out_payload[0] == i);
+    }
+  }
+  // Total messages handled (24) far exceeds kMaxQueuedInbound (8).
+  PL_ASSERT(!client.receive(topic, sizeof(topic), out_payload,
+                             sizeof(out_payload), &out_len));
+}

@@ -70,18 +70,19 @@ pulselink/
 
 ## Phase 4 — Gateway firmware + Wokwi + hardware bring-up (→ Part 4) **[hardware starts]**
 
-- [ ] `espnow/` transport backend; `WIFI_PS_NONE`; unicast peer management (needs an ESP32 toolchain this environment doesn't have)
+- [x] `espnow/` transport backend; `WIFI_PS_NONE`; unicast peer management (`transport/espnow/pl_espnow_transport.h` — written and syntax-checked against stub headers, D-014's bounded-wait MAC-ack design; genuinely unverified against real hardware, no ESP32 toolchain in this environment)
 - [x] Gateway HSM: Connected{Bridging, Draining} / Degraded superstates; bounded spool; refuse-with-reason (`core/pl_gateway_hsm.h` — hand-rolled stand-in for PulseHSM, D-013)
 - [x] MQTT integration, publish side: `pulsecore/{tenant_id}/{device_id}/{field}` topic mapping (`core/pl_topics.h`), pluggable `MqttClient` (`core/pl_mqtt.h`) with a fake backend for host tests (`transport/fake/pl_fake_mqtt.h`) and validated against a real Mosquitto broker (`examples/part4-gateway/host_bridge_demo.cpp`)
 - [x] MQTT integration, subscribe side (basic): `.../cmd` subscribe + receive proven against a real broker in the same demo
 - [x] `cmd_status` publish (`core/pl_cmd_status.h`: `format_cmd_status()` — delivered result code or "failed", the same `.../cmd_status` topic PulseDash already reads from)
 - [x] Health metrics: per-node loss rate from seq gaps (`core/pl_loss_tracker.h`'s `SeqLossTracker`, published as a `loss_rate` field), node liveness / offline+online events (`pl_registry.h`'s `check_offline_transition()`/`touch()`, published as an `online` field), gateway-wide ring overflow counter (`build_gateway_topic()` — TRD.md doesn't name a topic for gateway-wide metrics, since they have no device_id; this fills that gap with a `pulsecore/{tenant}/gateway/{field}` convention)
-- [ ] NVS registry backend (ESP32-only; RAM backend is host-test-only so far)
-- [ ] Wokwi project: gateway + 2 nodes end-to-end against local Mosquitto
-- [ ] Hardware rig: 3 devkits + Mosquitto (Docker) + PulseDash pointed at it
-- [ ] Record Part 4 demo: live nodes on a PulseDash dashboard
+- [x] NVS registry backend (`gateway/pl_nvs_registry_storage.h` via Arduino `Preferences`; RAM backend is still what host tests exercise directly). Writing this surfaced a real bug worth flagging: `Registry`'s constructor eagerly loads from storage, but as a global object it would construct *before* `setup()` runs — i.e. before `Preferences::begin()`. Fixed with an explicit `Registry::reload()`, called from `gateway.ino`'s `setup()` after `g_prefs.begin()`; covered by a new host test.
+- [x] `gateway/gateway.ino`: the full orchestration sketch — join handling, uplink dedupe/loss-tracking/field-bridging, downlink routing (new `parse_cmd_topic_device_id()` recovers device_id from a subscribed `.../cmd` topic), ALWAYS_ON retry polling vs. WAKE_AND_POLL listen-window delivery, health metrics, HSM-gated publish/spool throughout. `gateway/pl_pubsubclient_mqtt.h` is the real `MqttClient` backend (`PubSubClient`). All four `.ino` files in the repo (this one plus Parts 2-3's) syntax-check clean (`g++ -fsyntax-only`, zero warnings) against hand-written Arduino/ESP-NOW stub headers — real, but bounded: catches syntax/type errors against our own headers, not wrong real API signatures or hardware behavior. See `gateway/README.md` for exactly what is and isn't verified.
+- [ ] Wokwi project: gateway + 2 nodes end-to-end against local Mosquitto (needs the Wokwi web simulator, not available in this environment)
+- [ ] Hardware rig: 3 devkits + Mosquitto (Docker) + PulseDash pointed at it (needs physical boards + your local network)
+- [ ] Record Part 4 demo: live nodes on a PulseDash dashboard (depends on the hardware rig above)
 
-**Exit:** end-to-end demo on real boards. Part 4 draftable.
+**Exit:** end-to-end demo on real boards. Part 4 draftable. Everything that can be built and proven without physical hardware now is; what remains needs devkits, Wokwi, and your local network — this environment has none of the three.
 
 ## Phase 5 — Real-RF validation + sleep (→ Part 5 complete)
 

@@ -165,3 +165,29 @@ PL_TEST_CASE(rejoin_also_clears_the_offline_flag) {
                      PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS + 10);
   PL_ASSERT(!reg.touch(kMacA, PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS + 11));
 }
+
+PL_TEST_CASE(reload_picks_up_entries_written_after_construction) {
+  // Simulates gateway.ino's NVS sequencing fix: a Registry constructed
+  // before its storage backend was actually ready (empty read) still
+  // picks up the real data once reload() is called after the backend
+  // becomes ready.
+  RamRegistryStorage storage;
+  Registry reg(&storage);  // storage is empty at this point
+  PL_ASSERT(reg.size() == 0);
+
+  // Something else writes real data to the same backend...
+  RegistryEntry entries[1];
+  entries[0].valid = true;
+  memcpy(entries[0].mac, kMacA, 6);
+  entries[0].device_id = 3;
+  entries[0].sleep_profile = SleepProfile::kAlwaysOn;
+  entries[0].last_seen_ticks = 7;
+  entries[0].field_count = 0;
+  entries[0].reported_offline = false;
+  storage.save(entries, 1);
+
+  PL_ASSERT(reg.size() == 0);  // reg doesn't know yet
+  reg.reload();
+  PL_ASSERT(reg.size() == 1);
+  PL_ASSERT(reg.find_by_mac(kMacA) != nullptr);
+}

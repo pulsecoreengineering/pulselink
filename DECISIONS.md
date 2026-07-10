@@ -4,6 +4,24 @@ Append-only log. New entries at the top: date, decision, rationale, alternatives
 
 ---
 
+## 2026-07-10 — Phase 4: EspNowTransport synchronizes ESP-NOW's async MAC-ack
+
+**D-014: `transport/espnow/pl_espnow_transport.h`'s `send_unicast()` blocks
+for up to `kSendAckTimeoutMs` (50 ms) waiting on ESP-NOW's send callback
+before returning.** Every host-tested caller of `Transport` (join,
+channel-change recovery, the command table's retry logic) was written
+against the fake transport's synchronous "true MAC-ack" return value —
+real ESP-NOW's ack is asynchronous, arriving via `esp_now_register_send_cb`
+sometime after `esp_now_send()` returns. Turning it back into a
+synchronous answer at the `Transport` boundary means all of that
+host-tested logic runs unchanged on hardware. *Rejected:* changing
+`send_unicast()`'s return value to mean "queued" instead of "acked" on
+real hardware — that would silently break the MAC-ack semantics every
+Phase 1-3 test (and the logic it validates) assumes, for the sake of
+avoiding a bounded ~50 ms wait in `loop()`-context code, which isn't
+callback context and isn't subject to CLAUDE.md's callback-discipline
+rule.
+
 ## 2026-07-10 — Phase 4: PulseHSM stand-in for the gateway state machine
 
 **D-013: `core/pl_gateway_hsm.h`'s `GatewayHsm` is a hand-rolled state

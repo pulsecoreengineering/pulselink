@@ -33,7 +33,10 @@ The frame/field codec these sketches call is fully covered by
 `host_demo.cpp` is the same stack made visible rather than asserted on.
 The `.ino` files themselves are not compiled in this repo's CI (no ESP32
 Arduino toolchain in the host-native test environment); real-hardware
-compilation starts at Phase 4 (PLAN.md).
+compilation starts at Phase 4 (PLAN.md). They are syntax-checked with
+`g++ -fsyntax-only` against hand-written stub headers for `esp_now.h`/
+`WiFi.h` (see `gateway/README.md` for the caveat: that catches syntax
+errors, not wrong real API signatures) — both sketches compile clean.
 
 Article artifact — keep it minimal and readable, it appears in print
 (CLAUDE.md).

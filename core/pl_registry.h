@@ -82,6 +82,18 @@ class Registry {
   // `storage` is optional — pass nullptr for a registry that never
   // persists (fine for a scratch/throwaway test registry).
   explicit Registry(RegistryStorage* storage = nullptr) : storage_(storage) {
+    reload();
+  }
+
+  // Re-reads storage_, replacing all current in-memory state. The
+  // constructor already calls this once — expose it separately for
+  // backends whose readiness can't be guaranteed at construction time.
+  // C++ runs global objects' constructors before setup() on Arduino, but
+  // NVS-backed storage (gateway/pl_nvs_registry_storage.h) isn't ready
+  // until Preferences::begin() runs *inside* setup() — so a Registry
+  // declared as a global would otherwise silently load nothing. Call
+  // reload() again once the real backend is actually ready.
+  void reload() {
     for (int i = 0; i < PULSELINK_MAX_NODES; ++i) entries_[i].valid = false;
     if (!storage_) return;
     RegistryEntry loaded[PULSELINK_MAX_NODES];
