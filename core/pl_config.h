@@ -110,4 +110,12 @@
 #define PULSELINK_MAX_MQTT_SPOOL_DEPTH 32
 #endif
 
+// Node liveness (TRD.md §4.3, FR-7): miss this many simulated ticks of
+// silence since last_seen and the node is reported offline. Tutorial-scale
+// default — real deployments size this off each node's actual check-in
+// cadence (sleep profile dependent).
+#ifndef PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS
+#define PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS 120
+#endif
+
 #endif  // PULSELINK_CORE_PL_CONFIG_H

@@ -42,6 +42,10 @@ struct RegistryEntry {
   uint32_t last_seen_ticks;
   FieldMapping fields[PULSELINK_MAX_FIELDS_PER_NODE];
   uint8_t field_count;
+  // True once an offline event has been published for this node, so
+  // check_offline_transition() fires once per outage rather than every
+  // poll (TRD.md §4.3, FR-7: "last_seen -> offline events").
+  bool reported_offline;
 };
 
 class RegistryStorage {
@@ -106,6 +110,7 @@ class Registry {
     if (existing) {
       existing->sleep_profile = profile;
       existing->last_seen_ticks = now_ticks;
+      existing->reported_offline = false;  // rejoining counts as back online
       persist();
       return existing->device_id;
     }
@@ -125,15 +130,37 @@ class Registry {
     entries_[slot].sleep_profile = profile;
     entries_[slot].last_seen_ticks = now_ticks;
     entries_[slot].field_count = 0;
+    entries_[slot].reported_offline = false;
     persist();
     return entries_[slot].device_id;
   }
 
-  void touch(const uint8_t mac[6], uint32_t now_ticks) {
+  // Returns true if this uplink represents the node coming back online
+  // after check_offline_transition() had previously reported it offline —
+  // callers publish an "online" event on that edge, not on every touch().
+  bool touch(const uint8_t mac[6], uint32_t now_ticks) {
     RegistryEntry* e = find_by_mac(mac);
-    if (!e) return;
+    if (!e) return false;
+    bool was_offline = e->reported_offline;
     e->last_seen_ticks = now_ticks;
+    e->reported_offline = false;
     persist();
+    return was_offline;
+  }
+
+  // Call periodically per known node. Returns true exactly once when the
+  // node crosses from online to offline (last_seen_ticks stale beyond
+  // PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS) — callers publish an offline
+  // event on that transition, not on every poll.
+  bool check_offline_transition(uint8_t device_id, uint32_t now_ticks) {
+    RegistryEntry* e = find_by_device_id(device_id);
+    if (!e || e->reported_offline) return false;
+    if (now_ticks - e->last_seen_ticks >= PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS) {
+      e->reported_offline = true;
+      persist();
+      return true;
+    }
+    return false;
   }
 
   // Provisions (or updates) a field_id -> name mapping for a joined node.

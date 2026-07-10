@@ -85,6 +85,23 @@ inline uint8_t build_cmd_status_topic(const char* tenant_id, uint8_t device_id,
   return pos;
 }
 
+// Gateway-wide health metrics (TRD.md FR-7's ring overflow counter) don't
+// have a device_id — TRD.md doesn't name a topic for them, so this fills
+// that gap with a "gateway" pseudo-segment in place of a device_id:
+// pulsecore/{tenant_id}/gateway/{field}. Per-node metrics (loss rate,
+// liveness) use build_data_topic() instead, since they *do* have a
+// device_id and read naturally as just another field.
+inline uint8_t build_gateway_topic(const char* tenant_id, const char* field,
+                                    char* out, uint8_t out_cap) {
+  uint8_t pos = 0;
+  if (!detail::append(out, out_cap, &pos, "pulsecore/")) return 0;
+  if (!detail::append(out, out_cap, &pos, tenant_id)) return 0;
+  if (!detail::append(out, out_cap, &pos, "/gateway/")) return 0;
+  if (!detail::append(out, out_cap, &pos, field)) return 0;
+  out[pos] = '\0';
+  return pos;
+}
+
 }  // namespace pulselink
 
 #endif  // PULSELINK_CORE_PL_TOPICS_H

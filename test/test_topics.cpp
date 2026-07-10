@@ -45,3 +45,10 @@ PL_TEST_CASE(topic_builder_fails_closed_on_overflow) {
   uint8_t len = build_data_topic("acme", 7, "temperature", buf, sizeof(buf));
   PL_ASSERT(len == 0);
 }
+
+PL_TEST_CASE(gateway_topic_uses_gateway_pseudo_segment_not_a_device_id) {
+  char buf[PULSELINK_MAX_TOPIC_LEN];
+  uint8_t len = build_gateway_topic("acme", "ring_overflow", buf, sizeof(buf));
+  PL_ASSERT(len > 0);
+  PL_ASSERT(strcmp(buf, "pulsecore/acme/gateway/ring_overflow") == 0);
+}

@@ -127,3 +127,41 @@ PL_TEST_CASE(set_field_name_fails_for_unknown_device_id) {
   Registry reg;
   PL_ASSERT(!reg.set_field_name(0, 1, "x"));
 }
+
+PL_TEST_CASE(node_within_timeout_is_not_reported_offline) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, /*now=*/0);
+  PL_ASSERT(!reg.check_offline_transition(static_cast<uint8_t>(id),
+                                           PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS - 1));
+}
+
+PL_TEST_CASE(node_past_timeout_is_reported_offline_exactly_once) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, /*now=*/0);
+  uint8_t device_id = static_cast<uint8_t>(id);
+  uint32_t stale = PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS;
+
+  PL_ASSERT(reg.check_offline_transition(device_id, stale));
+  PL_ASSERT(!reg.check_offline_transition(device_id, stale + 1));  // already reported
+}
+
+PL_TEST_CASE(touch_after_offline_report_signals_back_online) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, 0);
+  uint8_t device_id = static_cast<uint8_t>(id);
+  reg.check_offline_transition(device_id, PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS);
+
+  PL_ASSERT(reg.touch(kMacA, PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS + 10));
+  PL_ASSERT(!reg.touch(kMacA, PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS + 11));  // no repeat
+}
+
+PL_TEST_CASE(rejoin_also_clears_the_offline_flag) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, 0);
+  uint8_t device_id = static_cast<uint8_t>(id);
+  reg.check_offline_transition(device_id, PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS);
+
+  reg.add_or_update(kMacA, SleepProfile::kAlwaysOn,
+                     PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS + 10);
+  PL_ASSERT(!reg.touch(kMacA, PULSELINK_NODE_OFFLINE_TIMEOUT_TICKS + 11));
+}

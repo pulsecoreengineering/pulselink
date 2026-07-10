@@ -74,7 +74,8 @@ pulselink/
 - [x] Gateway HSM: Connected{Bridging, Draining} / Degraded superstates; bounded spool; refuse-with-reason (`core/pl_gateway_hsm.h` — hand-rolled stand-in for PulseHSM, D-013)
 - [x] MQTT integration, publish side: `pulsecore/{tenant_id}/{device_id}/{field}` topic mapping (`core/pl_topics.h`), pluggable `MqttClient` (`core/pl_mqtt.h`) with a fake backend for host tests (`transport/fake/pl_fake_mqtt.h`) and validated against a real Mosquitto broker (`examples/part4-gateway/host_bridge_demo.cpp`)
 - [x] MQTT integration, subscribe side (basic): `.../cmd` subscribe + receive proven against a real broker in the same demo
-- [ ] MQTT integration, remaining: `cmd_status` publish wired to the command table's `on_ack`/FAILED transitions; health metrics (ring overflow counter, per-node loss rate from seq gaps, offline events from `last_seen`) — the underlying data already exists (`pl_ring.h`'s `overflow_count()`, `pl_registry.h`'s `last_seen_ticks`), just not yet published anywhere
+- [x] `cmd_status` publish (`core/pl_cmd_status.h`: `format_cmd_status()` — delivered result code or "failed", the same `.../cmd_status` topic PulseDash already reads from)
+- [x] Health metrics: per-node loss rate from seq gaps (`core/pl_loss_tracker.h`'s `SeqLossTracker`, published as a `loss_rate` field), node liveness / offline+online events (`pl_registry.h`'s `check_offline_transition()`/`touch()`, published as an `online` field), gateway-wide ring overflow counter (`build_gateway_topic()` — TRD.md doesn't name a topic for gateway-wide metrics, since they have no device_id; this fills that gap with a `pulsecore/{tenant}/gateway/{field}` convention)
 - [ ] NVS registry backend (ESP32-only; RAM backend is host-test-only so far)
 - [ ] Wokwi project: gateway + 2 nodes end-to-end against local Mosquitto
 - [ ] Hardware rig: 3 devkits + Mosquitto (Docker) + PulseDash pointed at it
