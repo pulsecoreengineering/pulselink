@@ -4,7 +4,10 @@ Gateway firmware (ESP32). Bridges the ESP-NOW node cluster to MQTT so
 PulseDash sees the standard `pulsecore/{tenant_id}/{device_id}/{field}`
 topic tree unchanged.
 
-- `gateway.ino` — the whole thing wired together: join handling, uplink
+- `gateway.ino` — the whole thing wired together: join handling (which
+  also provisions the field-name map on every successful join — this
+  tutorial's fleet is one node type sending one field, so the mapping is
+  the same for everyone; see `handle_join_req()`), uplink
   dedupe/loss-tracking/field-bridging, downlink command routing, the
   two-loop ack model, the WAKE_AND_POLL mailbox, health metrics, and the
   `GatewayHsm` backhaul state machine (TRD.md §4.4, D-013):
@@ -63,4 +66,11 @@ host-tested caller expects (D-014, DECISIONS.md) — reasonable on paper,
 unverified on a real radio.
 
 This is where the hardware rig, a Wokwi project, and real devkits take
-over (PLAN.md Phase 4) — resources this environment doesn't have.
+over (PLAN.md Phase 4) — resources this environment doesn't have. One bug
+already turned up this way before ever touching hardware: writing
+`wokwi/single-board/combined.ino` alongside this file surfaced a missing
+`set_field_name()` call that meant no DATA field would ever have actually
+been published to MQTT — see `wokwi/single-board/README.md` for the story.
+Fixed here too. Worth remembering: orchestration glue like this file isn't
+unit-testable, so re-reading it end to end (or writing a sibling copy, as
+happened here) is sometimes the only way a bug like that surfaces.

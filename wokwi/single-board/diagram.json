@@ -5,16 +5,9 @@
   "parts": [
     {
       "type": "board-esp32-devkit-c-v4",
-      "id": "gateway",
+      "id": "board",
       "top": 0,
       "left": 0,
-      "attrs": {}
-    },
-    {
-      "type": "board-esp32-devkit-c-v4",
-      "id": "node",
-      "top": 0,
-      "left": 320,
       "attrs": {}
     }
   ],

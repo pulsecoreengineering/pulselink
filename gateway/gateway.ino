@@ -47,6 +47,12 @@ static const int kMqttPort = 1883;
 static const char kTenantId[] = "acme";
 static const uint8_t kProvisioningToken[PULSELINK_PROVISIONING_TOKEN_SIZE] = {
     1, 2, 3, 4};
+// Field schema for this deployment (TRD.md §3.3, §4.3: "delivered at join
+// or provisioned" — provisioned here, applied to every joining node).
+// This tutorial's fleet is one node type (node/node.ino) sending one
+// field; a fleet with multiple node types would provision per device
+// type instead of the same map for every join.
+static const uint8_t kFieldIdTemperatureC10 = 1;
 static const uint32_t kHealthMetricsIntervalTicks = 30;  // seconds
 static const uint32_t kMqttReconnectIntervalMs = 5000;
 // ---------------------------------------------------
@@ -174,6 +180,8 @@ void handle_join_req(const uint8_t src[6], const uint8_t* payload,
                            ack_payload_len, frame, &frame_len);
   g_espnow.send_unicast(src, frame, frame_len);
 
+  g_registry.set_field_name(ack.device_id, kFieldIdTemperatureC10,
+                             "temperature");
   Serial.printf("joined device_id=%u\n", ack.device_id);
 }
 
