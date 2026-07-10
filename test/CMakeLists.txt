@@ -9,6 +9,8 @@ add_executable(pulselink_host_tests
   test_registry.cpp
   test_join.cpp
   test_join_flow.cpp
+  test_cmdtable.cpp
+  test_cmd_flow.cpp
 )
 
 target_include_directories(pulselink_host_tests PRIVATE ${CMAKE_SOURCE_DIR})

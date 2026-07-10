@@ -61,4 +61,16 @@
 #define PULSELINK_JOIN_RATE_WINDOW_TICKS 60
 #endif
 
+// Downlink command retry policy (TRD.md §4.2). Retries live in the calling
+// state's own counter (Pattern 8, CLAUDE.md) — these bound how many
+// retransmissions a command table slot gets before it's marked FAILED, and
+// how long to wait between them. Tutorial-scale defaults, not TRD numbers.
+#ifndef PULSELINK_MAX_CMD_RETRIES
+#define PULSELINK_MAX_CMD_RETRIES 3
+#endif
+
+#ifndef PULSELINK_CMD_RETRY_TIMEOUT_TICKS
+#define PULSELINK_CMD_RETRY_TIMEOUT_TICKS 5
+#endif
+
 #endif  // PULSELINK_CORE_PL_CONFIG_H

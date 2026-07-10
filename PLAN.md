@@ -59,12 +59,12 @@ pulselink/
 
 ## Phase 3 — Command table + reliability core (→ Part 5 logic, tested early)
 
-- [ ] `pl_cmdtable.h`: PENDING→SENT→ACKED/FAILED, retries in calling state (Pattern 8), deadlines
-- [ ] Two-loop ack model: fake MAC-ack vs app-ack, including "MAC-ack lies for broadcast" case
-- [ ] Node cmd_id dedupe (re-ack without re-execute)
-- [ ] Sleep-profile mailbox: hold CMD for WAKE_AND_POLL node, deliver in listen window (simulated timing)
-- [ ] CMD_ACK result-code enum end to end; NACK path
-- [ ] Tests: every failure mode in TRD §7 that the fake transport can express (1–8 except real-RF aspects)
+- [x] `pl_cmdtable.h`: PENDING→SENT→ACKED/FAILED, retries in calling state (Pattern 8), deadlines
+- [x] Two-loop ack model: fake MAC-ack vs app-ack, including "MAC-ack lies for broadcast" case (broadcast case covered in Phase 1's `test_fake_transport.cpp`; Phase 3 adds the CMD/CMD_ACK-specific MAC-ack-vs-app-ack test)
+- [x] Node cmd_id dedupe (re-ack without re-execute)
+- [x] Sleep-profile mailbox: hold CMD for WAKE_AND_POLL node, deliver in listen window (simulated timing)
+- [x] CMD_ACK result-code enum end to end; NACK path
+- [x] Tests: TRD §7 failure modes 1, 3, 4, 5, 6, 7, 8 (modes covered across Phases 1-3). Mode 2 (broker down → Degraded spool) needs the MQTT/HSM gateway machinery and is deferred to Phase 4; it isn't a real-RF gap, just a not-yet-built-one.
 
 **Exit:** all protocol logic proven off-target. This is the series' "we test embedded protocol logic on the desktop" showpiece.
 
