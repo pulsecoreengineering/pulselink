@@ -48,12 +48,12 @@ pulselink/
 
 ## Phase 2 — Join/pairing + registry (→ Part 3)
 
-- [ ] JOIN_REQ/JOIN_ACK flow over fake transport; provisioning token check
-- [ ] Registry with pluggable storage (RAM backend for host tests; NVS backend stub for ESP32)
-- [ ] Node-side: persist gateway MAC + channel; N-failure → re-discovery fallback
-- [ ] Gateway-side: join rate-limit per MAC
-- [ ] Tests: fresh join, rejoin from persistence, channel-change recovery (fake transport simulates channel mismatch), join-spam rate limiting
-- [ ] `examples/part3-pairing`
+- [x] JOIN_REQ/JOIN_ACK flow over fake transport; provisioning token check
+- [x] Registry with pluggable storage (RAM backend for host tests; NVS backend is pseudocode in the Part 3 `.ino` files for now — a real ESP32 implementation lands in Phase 4 hardware bring-up)
+- [x] Node-side: persist gateway MAC + channel; N-failure → re-discovery fallback
+- [x] Gateway-side: join rate-limit per MAC
+- [x] Tests: fresh join, rejoin from persistence, channel-change recovery (fake transport simulates channel mismatch), join-spam rate limiting
+- [x] `examples/part3-pairing`
 
 **Exit:** Part 3 draftable. Order/locate 3–5 ESP32 devkits now if not on hand.
 

@@ -6,6 +6,9 @@ add_executable(pulselink_host_tests
   test_dedupe.cpp
   test_ring.cpp
   test_fake_transport.cpp
+  test_registry.cpp
+  test_join.cpp
+  test_join_flow.cpp
 )
 
 target_include_directories(pulselink_host_tests PRIVATE ${CMAKE_SOURCE_DIR})

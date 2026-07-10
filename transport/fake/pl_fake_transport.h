@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "../../core/pl_config.h"
+#include "../../core/pl_mac.h"
 #include "../../core/pl_ring.h"
 #include "../pl_transport.h"
 
@@ -20,12 +21,7 @@
 namespace pulselink {
 namespace fake {
 
-inline bool mac_equal(const uint8_t a[6], const uint8_t b[6]) {
-  for (int i = 0; i < 6; ++i) {
-    if (a[i] != b[i]) return false;
-  }
-  return true;
-}
+using pulselink::mac_equal;
 
 // Shared medium: owns fault-injection policy and routes frames between
 // endpoints registered on it. One FakeMedium per simulated cluster.
