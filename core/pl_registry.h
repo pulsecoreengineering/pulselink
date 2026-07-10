@@ -7,10 +7,16 @@
 #include "pl_config.h"
 #include "pl_mac.h"
 
-// MAC <-> device_id <-> {sleep_profile, last_seen} registry (TRD.md §4.3).
-// field_map and pending_cmds join this struct in later phases, once the
-// gateway's topic mapping (Phase 4) and command table (Phase 3) exist to
-// populate them — no point carrying fields nothing writes yet.
+// MAC <-> device_id <-> {sleep_profile, last_seen, field_map} registry
+// (TRD.md §4.3). pending_cmds isn't modeled here — the command table
+// (pl_cmdtable.h) already tracks in-flight commands per device_id, so
+// duplicating that state in the registry would just be two sources of
+// truth for the same fact.
+//
+// field_map is field_id -> MQTT field name (TRD.md §3.3): "delivered at
+// join or provisioned." This tutorial's gateway provisions it directly
+// (set_field_name()) rather than extending JOIN_REQ's wire format —
+// TRD.md names both as valid, and provisioning is the simpler one.
 //
 // Storage is pluggable: RegistryStorage is the seam. RamRegistryStorage
 // below is the host-test backend; an NVS-backed implementation is a
@@ -23,12 +29,19 @@ enum class SleepProfile : unsigned char {
   kWakeAndPoll,
 };
 
+struct FieldMapping {
+  uint8_t field_id;
+  char name[PULSELINK_MAX_FIELD_NAME_LEN];
+};
+
 struct RegistryEntry {
   bool valid;
   uint8_t mac[6];
   uint8_t device_id;
   SleepProfile sleep_profile;
   uint32_t last_seen_ticks;
+  FieldMapping fields[PULSELINK_MAX_FIELDS_PER_NODE];
+  uint8_t field_count;
 };
 
 class RegistryStorage {
@@ -111,6 +124,7 @@ class Registry {
     entries_[slot].device_id = static_cast<uint8_t>(slot);
     entries_[slot].sleep_profile = profile;
     entries_[slot].last_seen_ticks = now_ticks;
+    entries_[slot].field_count = 0;
     persist();
     return entries_[slot].device_id;
   }
@@ -120,6 +134,52 @@ class Registry {
     if (!e) return;
     e->last_seen_ticks = now_ticks;
     persist();
+  }
+
+  // Provisions (or updates) a field_id -> name mapping for a joined node.
+  // Returns false if device_id is unknown or the per-node field table is
+  // full.
+  bool set_field_name(uint8_t device_id, uint8_t field_id, const char* name) {
+    RegistryEntry* e = find_by_device_id(device_id);
+    if (!e) return false;
+
+    for (uint8_t i = 0; i < e->field_count; ++i) {
+      if (e->fields[i].field_id == field_id) {
+        strncpy(e->fields[i].name, name, PULSELINK_MAX_FIELD_NAME_LEN - 1);
+        e->fields[i].name[PULSELINK_MAX_FIELD_NAME_LEN - 1] = '\0';
+        persist();
+        return true;
+      }
+    }
+    if (e->field_count >= PULSELINK_MAX_FIELDS_PER_NODE) return false;
+
+    FieldMapping& m = e->fields[e->field_count++];
+    m.field_id = field_id;
+    strncpy(m.name, name, PULSELINK_MAX_FIELD_NAME_LEN - 1);
+    m.name[PULSELINK_MAX_FIELD_NAME_LEN - 1] = '\0';
+    persist();
+    return true;
+  }
+
+  // Returns the provisioned field name, or nullptr if this device_id/
+  // field_id combination hasn't been mapped — callers should treat that
+  // as "don't know how to publish this field" rather than guessing.
+  const char* find_field_name(uint8_t device_id, uint8_t field_id) {
+    RegistryEntry* e = find_by_device_id(device_id);
+    if (!e) return nullptr;
+    for (uint8_t i = 0; i < e->field_count; ++i) {
+      if (e->fields[i].field_id == field_id) return e->fields[i].name;
+    }
+    return nullptr;
+  }
+
+  RegistryEntry* find_by_device_id(uint8_t device_id) {
+    for (int i = 0; i < PULSELINK_MAX_NODES; ++i) {
+      if (entries_[i].valid && entries_[i].device_id == device_id) {
+        return &entries_[i];
+      }
+    }
+    return nullptr;
   }
 
   int size() const {

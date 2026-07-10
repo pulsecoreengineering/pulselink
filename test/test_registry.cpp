@@ -1,5 +1,7 @@
 #include "pl_test.h"
 
+#include <cstring>
+
 #include "../core/pl_registry.h"
 
 using namespace pulselink;  // NOLINT
@@ -78,4 +80,50 @@ PL_TEST_CASE(ram_storage_survives_across_registry_instances) {
   PL_ASSERT(e != nullptr);
   PL_ASSERT(e->sleep_profile == SleepProfile::kWakeAndPoll);
   PL_ASSERT(e->last_seen_ticks == 42);
+}
+
+PL_TEST_CASE(unmapped_field_name_is_not_found) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, 0);
+  PL_ASSERT(reg.find_field_name(static_cast<uint8_t>(id), 1) == nullptr);
+}
+
+PL_TEST_CASE(set_field_name_provisions_and_finds_it) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, 0);
+  uint8_t device_id = static_cast<uint8_t>(id);
+  PL_ASSERT(reg.set_field_name(device_id, 1, "temperature"));
+
+  const char* name = reg.find_field_name(device_id, 1);
+  PL_ASSERT(name != nullptr);
+  PL_ASSERT(strcmp(name, "temperature") == 0);
+}
+
+PL_TEST_CASE(set_field_name_updates_an_existing_mapping) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, 0);
+  uint8_t device_id = static_cast<uint8_t>(id);
+  reg.set_field_name(device_id, 1, "temp_c");
+  reg.set_field_name(device_id, 1, "temperature");
+
+  PL_ASSERT(strcmp(reg.find_field_name(device_id, 1), "temperature") == 0);
+}
+
+PL_TEST_CASE(set_field_name_truncates_names_longer_than_the_buffer) {
+  Registry reg;
+  int id = reg.add_or_update(kMacA, SleepProfile::kAlwaysOn, 0);
+  uint8_t device_id = static_cast<uint8_t>(id);
+  // 20 chars, longer than PULSELINK_MAX_FIELD_NAME_LEN (16) can hold with
+  // a NUL terminator — must truncate cleanly, not overflow.
+  reg.set_field_name(device_id, 1, "temperature_celsius");
+
+  const char* name = reg.find_field_name(device_id, 1);
+  PL_ASSERT(strlen(name) == PULSELINK_MAX_FIELD_NAME_LEN - 1);
+  PL_ASSERT(strncmp(name, "temperature_celsius", PULSELINK_MAX_FIELD_NAME_LEN - 1) ==
+            0);
+}
+
+PL_TEST_CASE(set_field_name_fails_for_unknown_device_id) {
+  Registry reg;
+  PL_ASSERT(!reg.set_field_name(0, 1, "x"));
 }

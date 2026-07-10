@@ -4,6 +4,20 @@ Append-only log. New entries at the top: date, decision, rationale, alternatives
 
 ---
 
+## 2026-07-10 — Phase 4: PulseHSM stand-in for the gateway state machine
+
+**D-013: `core/pl_gateway_hsm.h`'s `GatewayHsm` is a hand-rolled state
+machine, not the real PulseHSM library.** Same situation as D-011/Structa:
+PulseHSM lives in PulseCore and isn't vendored into this repo. `GatewayHsm`
+implements exactly the state/event contract TRD.md §4.4 specifies —
+`Connected{Bridging, Draining}` / `Degraded`, bounded drop-oldest spool,
+refuse-downlink-with-reason — as a plain class rather than
+`PULSEHSM_MAX_STATES`-style config macros or a generic reusable framework.
+*Rejected:* building a full generic HSM framework clone to host one gateway
+state machine (disproportionate to what Phase 4 actually needs; PulseHSM
+integration is a later swap behind the same state contract, not a
+prerequisite for proving the Degraded/spool/drain logic works).
+
 ## 2026-07-10 — Phase 1: Structa stand-in for DATA field tuples
 
 **D-011: `core/pl_fields.h` is a minimal zero-heap (field_id:u8, type, value)

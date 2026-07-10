@@ -73,4 +73,41 @@
 #define PULSELINK_CMD_RETRY_TIMEOUT_TICKS 5
 #endif
 
+// MQTT topic scheme: pulsecore/{tenant_id}/{device_id}/{field} (TRD.md §1).
+// device_id is formatted as decimal digits (registry's device_id is a
+// uint8_t, so max 3 digits); tenant_id and field are short fixed strings.
+#ifndef PULSELINK_MAX_TENANT_ID_LEN
+#define PULSELINK_MAX_TENANT_ID_LEN 16
+#endif
+
+#ifndef PULSELINK_MAX_FIELD_NAME_LEN
+#define PULSELINK_MAX_FIELD_NAME_LEN 16
+#endif
+
+// Per-node field_id -> MQTT field name map (TRD.md §3.3, §4.3): "gateway
+// maps field_id -> topic name via registry metadata... delivered at join
+// or provisioned." This tutorial's gateway example provisions it directly
+// rather than extending JOIN_REQ's wire format — both are valid per TRD.
+#ifndef PULSELINK_MAX_FIELDS_PER_NODE
+#define PULSELINK_MAX_FIELDS_PER_NODE 8
+#endif
+
+#ifndef PULSELINK_MAX_TOPIC_LEN
+#define PULSELINK_MAX_TOPIC_LEN 64
+#endif
+
+// MQTT payload cap: a single field's value as compact text, not JSON (no
+// JSON-on-the-wire applies to MQTT payloads too — CLAUDE.md's zero-heap
+// contract is ESP-NOW-side, but the "no JSON" spirit carries over: one
+// topic, one scalar value, human-readable for a `mosquitto_sub` to show).
+#ifndef PULSELINK_MAX_MQTT_PAYLOAD
+#define PULSELINK_MAX_MQTT_PAYLOAD 32
+#endif
+
+// Bounded uplink spool while the backhaul is down (TRD.md §4.4 Degraded
+// superstate): drop-oldest when full, same policy as the ESP-NOW ring.
+#ifndef PULSELINK_MAX_MQTT_SPOOL_DEPTH
+#define PULSELINK_MAX_MQTT_SPOOL_DEPTH 32
+#endif
+
 #endif  // PULSELINK_CORE_PL_CONFIG_H
