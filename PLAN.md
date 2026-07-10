@@ -38,22 +38,22 @@ pulselink/
 
 ## Phase 1 — Frame codec + fake transport (→ enables Part 2 article)
 
-- [ ] `pl_frame.h`: serialize/parse header field-by-field; magic/version rejection; payload_len truncation detection
-- [ ] Self-describing DATA field tuples via Structa
-- [ ] `fake/` transport: in-process delivery between simulated gateway + N nodes; injectable frame drop rate, duplication, delay
-- [ ] Tests: round-trip all msg types; corrupt/truncated/foreign-frame rejection; seq dedupe
-- [ ] `examples/part2-node-to-node`: minimal two-board sketch using codec + ring discipline (compiles for ESP32; logic verified via fake transport)
+- [x] `pl_frame.h`: serialize/parse header field-by-field; magic/version rejection; payload_len truncation detection
+- [x] Self-describing DATA field tuples via Structa (`pl_fields.h` stands in for Structa itself — not vendored into this repo; see DECISIONS.md D-011)
+- [x] `fake/` transport: in-process delivery between simulated gateway + N nodes; injectable frame drop rate, duplication, delay
+- [x] Tests: round-trip all msg types; corrupt/truncated/foreign-frame rejection; seq dedupe
+- [x] `examples/part2-node-to-node`: minimal two-board sketch using codec + ring discipline (logic verified via fake transport; real ESP32 compilation deferred to Phase 4 hardware bring-up)
 
 **Exit:** Part 2 code artifact done. Part 1 (no code) and Part 2 articles can be written.
 
 ## Phase 2 — Join/pairing + registry (→ Part 3)
 
-- [ ] JOIN_REQ/JOIN_ACK flow over fake transport; provisioning token check
-- [ ] Registry with pluggable storage (RAM backend for host tests; NVS backend stub for ESP32)
-- [ ] Node-side: persist gateway MAC + channel; N-failure → re-discovery fallback
-- [ ] Gateway-side: join rate-limit per MAC
-- [ ] Tests: fresh join, rejoin from persistence, channel-change recovery (fake transport simulates channel mismatch), join-spam rate limiting
-- [ ] `examples/part3-pairing`
+- [x] JOIN_REQ/JOIN_ACK flow over fake transport; provisioning token check
+- [x] Registry with pluggable storage (RAM backend for host tests; NVS backend is pseudocode in the Part 3 `.ino` files for now — a real ESP32 implementation lands in Phase 4 hardware bring-up)
+- [x] Node-side: persist gateway MAC + channel; N-failure → re-discovery fallback
+- [x] Gateway-side: join rate-limit per MAC
+- [x] Tests: fresh join, rejoin from persistence, channel-change recovery (fake transport simulates channel mismatch), join-spam rate limiting
+- [x] `examples/part3-pairing`
 
 **Exit:** Part 3 draftable. Order/locate 3–5 ESP32 devkits now if not on hand.
 

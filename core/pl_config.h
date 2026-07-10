@@ -35,4 +35,30 @@
 #define PULSELINK_MAX_CMD_SLOTS PULSELINK_MAX_NODES
 #endif
 
+// Shared-secret provisioning token carried in JOIN_REQ (TRD.md §5.1).
+// Size is a tutorial-scale default, not a TRD-mandated number.
+#ifndef PULSELINK_PROVISIONING_TOKEN_SIZE
+#define PULSELINK_PROVISIONING_TOKEN_SIZE 4
+#endif
+
+// Consecutive unicast send failures before a node wipes its channel
+// assumption and re-runs discovery — this *is* the channel-change recovery
+// mechanism (TRD.md §5.1 point 4, D-008). Tutorial-scale default.
+#ifndef PULSELINK_MAX_UNICAST_FAILURES
+#define PULSELINK_MAX_UNICAST_FAILURES 5
+#endif
+
+// Gateway-side join rate limiting (TRD.md §7 failure mode 3: a
+// crash-looping node spamming JOIN_REQ). At most this many attempts per
+// MAC are allowed inside a window of this many simulated ticks; the rest
+// are silently ignored (silence means retry, per the protocol's own
+// semantics — no NACK needed). Tutorial-scale defaults, not TRD numbers.
+#ifndef PULSELINK_MAX_JOIN_ATTEMPTS_PER_WINDOW
+#define PULSELINK_MAX_JOIN_ATTEMPTS_PER_WINDOW 3
+#endif
+
+#ifndef PULSELINK_JOIN_RATE_WINDOW_TICKS
+#define PULSELINK_JOIN_RATE_WINDOW_TICKS 60
+#endif
+
 #endif  // PULSELINK_CORE_PL_CONFIG_H
