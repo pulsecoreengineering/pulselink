@@ -4,6 +4,19 @@ Append-only log. New entries at the top: date, decision, rationale, alternatives
 
 ---
 
+## 2026-07-10 — Phase 1: Structa stand-in for DATA field tuples
+
+**D-011: `core/pl_fields.h` is a minimal zero-heap (field_id:u8, type, value)
+tuple codec, not the real Structa library.** Structa isn't vendored into this
+repo (it lives in PulseCore, out of scope to pull in here). The codec matches
+the wire format TRD.md §3.3 specifies — a DATA payload built with
+`pl_fields.h` today is byte-for-byte what a future Structa-backed encoder
+would produce, so swapping the implementation later doesn't change anything
+already on the wire or in `test/`. *Rejected:* blocking Phase 1 (and every
+phase after it) on vendoring Structa first — the dependency is an
+implementation detail behind a fixed wire contract, not a prerequisite for
+proving the protocol logic.
+
 ## 2026-07-10 — Initial settled decisions (planning phase)
 
 **D-001: Content-first framing.** PulseLink is the reference implementation for a LogicFrenzy series, not a PulseDash product feature. Productization only if reader/customer demand appears. *Rejected:* building it as ecosystem infrastructure now (no customer pull; competes with P1 widget backlog).

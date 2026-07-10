@@ -38,11 +38,11 @@ pulselink/
 
 ## Phase 1 — Frame codec + fake transport (→ enables Part 2 article)
 
-- [ ] `pl_frame.h`: serialize/parse header field-by-field; magic/version rejection; payload_len truncation detection
-- [ ] Self-describing DATA field tuples via Structa
-- [ ] `fake/` transport: in-process delivery between simulated gateway + N nodes; injectable frame drop rate, duplication, delay
-- [ ] Tests: round-trip all msg types; corrupt/truncated/foreign-frame rejection; seq dedupe
-- [ ] `examples/part2-node-to-node`: minimal two-board sketch using codec + ring discipline (compiles for ESP32; logic verified via fake transport)
+- [x] `pl_frame.h`: serialize/parse header field-by-field; magic/version rejection; payload_len truncation detection
+- [x] Self-describing DATA field tuples via Structa (`pl_fields.h` stands in for Structa itself — not vendored into this repo; see DECISIONS.md D-011)
+- [x] `fake/` transport: in-process delivery between simulated gateway + N nodes; injectable frame drop rate, duplication, delay
+- [x] Tests: round-trip all msg types; corrupt/truncated/foreign-frame rejection; seq dedupe
+- [x] `examples/part2-node-to-node`: minimal two-board sketch using codec + ring discipline (logic verified via fake transport; real ESP32 compilation deferred to Phase 4 hardware bring-up)
 
 **Exit:** Part 2 code artifact done. Part 1 (no code) and Part 2 articles can be written.
 
