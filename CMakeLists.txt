@@ -13,3 +13,4 @@ add_compile_options(-Wall -Wextra)
 
 enable_testing()
 add_subdirectory(test)
+add_subdirectory(examples/part2-node-to-node)
