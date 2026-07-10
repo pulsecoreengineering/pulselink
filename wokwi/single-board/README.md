@@ -5,13 +5,17 @@ after confirming Wokwi doesn't support running different firmware on
 multiple boards in one project (the earlier `wokwi/gateway-node/` attempt
 assumed it did and was removed).
 
-**Confirmed working, run live by the user on wokwi.com (2026-07-10):**
+**Fully confirmed working, run live by the user on wokwi.com (2026-07-10):**
 compiled clean and produced exactly the boot sequence documented below —
 WiFi connect, MQTT connect, join, pairing, repeated temperature publish.
-First time any of this code had ever actually been compiled or executed.
-Downlink and health-metrics publishing are the same code path but haven't
-been separately confirmed live yet — see "What to expect" below for how
-to check them.
+First time any of this code had ever actually been compiled or executed,
+first try. Independently verified via `mosquitto_sub`/`mosquitto_pub` from
+the user's own machine (not just the Wokwi Serial log, which only proves
+the code ran, not that the broker received anything): uplink
+(`temperature` updating live), health metrics (`loss_rate`,
+`ring_overflow` landing on the 30s cycle), and downlink (a published `cmd`
+triggered `node: executing cmd_id=0` and a real `cmd_status ok` came
+back) all round-tripped through the public broker for real.
 
 ## The approach
 
