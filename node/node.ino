@@ -1,0 +1,217 @@
+// PulseLink node firmware — ALWAYS_ON profile. Joins a gateway, sends a
+// periodic DATA field, and executes/acks downlink CMDs with dedupe.
+//
+// LogicFrenzy series, Part 5 — "Reliability & sleep" (this file covers the
+// ALWAYS_ON half; WAKE_AND_POLL deep-sleep timing is real-hardware-only
+// territory, TRD.md §5.2, and isn't attempted here).
+//
+// NOT compiled against the real ESP32 Arduino core in this repo's CI — no
+// ESP32 toolchain in the host-native test environment (see
+// gateway/README.md for what "syntax-checked, not compiled" means here).
+// Every piece of logic this file calls (join codec, NodePairingState,
+// NodeCmdDedupe, frame/field codec) is covered by the host-native tests in
+// test/ against transport/fake/.
+//
+// Uses EspNowTransport for MAC-ack, same as gateway.ino — earlier examples
+// (examples/part3-pairing/node_join.ino) used esp_now_send()'s return
+// value directly and flagged that as a known simplification ("queued," not
+// "acked"); this file uses the real fix (D-014, DECISIONS.md) instead.
+//
+// Channel alignment: this node never calls WiFi.begin() — ESP-NOW doesn't
+// need an AP connection, and skipping it is the point (no WiFi credentials
+// or join latency on every node). That means it relies on already being
+// on the gateway's channel; TRD.md §5.1's full channel-scanning discovery
+// (broadcast on channels 1-13) is not implemented here, same simplification
+// node_join.ino already noted. wokwi/gateway-node/'s copy of this file
+// adds a WiFi.begin() call specifically to align channels inside the
+// simulator — see that project's README for why.
+
+#include <cstring>
+
+#include <Preferences.h>
+#include <WiFi.h>
+#include <esp_now.h>
+
+#include "../core/pl_cmdtable.h"
+#include "../core/pl_fields.h"
+#include "../core/pl_frame.h"
+#include "../core/pl_join.h"
+#include "../transport/espnow/pl_espnow_transport.h"
+
+// ---- Deployment config — edit before flashing ----
+static const uint8_t kProvisioningToken[PULSELINK_PROVISIONING_TOKEN_SIZE] = {
+    1, 2, 3, 4};
+static const pulselink::SleepProfile kSleepProfile =
+    pulselink::SleepProfile::kAlwaysOn;
+static const uint8_t kFieldIdTemperatureC10 = 1;
+static const uint32_t kDataSendIntervalMs = 5000;
+static const uint32_t kJoinRetryIntervalMs = 2000;
+// ---------------------------------------------------
+
+pulselink::espnow::EspNowTransport g_espnow;
+Preferences g_prefs;
+pulselink::NodePairingState g_pairing;
+pulselink::NodeCmdDedupe g_cmd_dedupe;
+uint8_t g_seq = 0;
+
+void save_pairing() {
+  uint8_t bytes[pulselink::NodePairingState::kSerializedSize];
+  g_pairing.serialize(bytes);
+  g_prefs.putBytes("pairing", bytes, sizeof(bytes));
+}
+
+// Returns true if a paired record was actually restored. A stale record
+// (gateway MAC/channel no longer valid, e.g. after a router channel
+// change) is self-correcting: the first few unicast sends fail,
+// on_send_result() wipes the pairing after PULSELINK_MAX_UNICAST_FAILURES
+// of them, and normal re-discovery takes over — see channel-change
+// recovery in examples/part3-pairing.
+bool load_pairing() {
+  uint8_t bytes[pulselink::NodePairingState::kSerializedSize];
+  size_t got = g_prefs.getBytes("pairing", bytes, sizeof(bytes));
+  if (got != sizeof(bytes)) return false;
+  g_pairing.deserialize(bytes);
+  return g_pairing.paired();
+}
+
+void broadcast_join_request() {
+  pulselink::JoinRequestPayload req;
+  memcpy(req.token, kProvisioningToken, sizeof(kProvisioningToken));
+  req.sleep_profile = kSleepProfile;
+
+  uint8_t payload[16];
+  uint8_t payload_len = pulselink::encode_join_request(req, payload);
+
+  uint8_t frame[PULSELINK_FRAME_HEADER_SIZE + 16];
+  uint8_t frame_len = 0;
+  pulselink::encode_frame(pulselink::MsgType::kJoinReq, /*seq=*/0,
+                           /*cmd_id=*/0, payload, payload_len, frame,
+                           &frame_len);
+  g_espnow.send_broadcast(frame, frame_len);
+  Serial.println("broadcasting JOIN_REQ");
+}
+
+int16_t read_fake_temperature_c10() {
+  // Stand-in for a real sensor read — drifts visibly so a live demo shows
+  // changing numbers instead of a static one.
+  return static_cast<int16_t>(200 + (millis() / 1000) % 100);  // 20.0-29.9C
+}
+
+void send_data() {
+  uint8_t payload[PULSELINK_MAX_FRAME_PAYLOAD];
+  pulselink::FieldWriter fields(payload, sizeof(payload));
+  fields.write_i16(kFieldIdTemperatureC10, read_fake_temperature_c10());
+
+  uint8_t frame[PULSELINK_FRAME_HEADER_SIZE + PULSELINK_MAX_FRAME_PAYLOAD];
+  uint8_t frame_len = 0;
+  pulselink::encode_frame(pulselink::MsgType::kData, g_seq++, /*cmd_id=*/0,
+                           payload, fields.length(), frame, &frame_len);
+
+  bool acked = g_espnow.send_unicast(g_pairing.gateway_mac(), frame,
+                                      frame_len);
+  if (g_pairing.on_send_result(acked)) {
+    Serial.println("channel assumption invalidated, re-discovering");
+  }
+}
+
+void handle_join_ack(const uint8_t src[6], const uint8_t* payload,
+                      uint8_t payload_len) {
+  pulselink::JoinAckPayload ack;
+  if (!pulselink::decode_join_ack(payload, payload_len, &ack)) return;
+  g_pairing.on_join_ack(src, ack.channel);
+  save_pairing();
+  Serial.printf("paired: device_id=%u channel=%u\n", ack.device_id,
+                ack.channel);
+}
+
+void handle_cmd(const uint8_t src[6], const pulselink::FrameHeader& header,
+                 const uint8_t* payload, uint8_t payload_len) {
+  (void)payload;
+  (void)payload_len;
+
+  pulselink::CmdResult result;
+  if (g_cmd_dedupe.already_executed(header.cmd_id)) {
+    result = g_cmd_dedupe.last_result();  // re-ack, don't re-run
+  } else {
+    // Stand-in "command handler" — a real node would dispatch on the CMD
+    // payload bytes to actually do something (toggle a relay, etc).
+    result = pulselink::CmdResult::kOk;
+    Serial.printf("executing cmd_id=%u\n", header.cmd_id);
+    g_cmd_dedupe.record_execution(header.cmd_id, result);
+  }
+
+  uint8_t ack_payload[1];
+  uint8_t ack_payload_len = pulselink::encode_cmd_ack(result, ack_payload);
+  uint8_t ack_frame[PULSELINK_FRAME_HEADER_SIZE + 1];
+  uint8_t ack_frame_len = 0;
+  pulselink::encode_frame(pulselink::MsgType::kCmdAck, 0, header.cmd_id,
+                           ack_payload, ack_payload_len, ack_frame,
+                           &ack_frame_len);
+  g_espnow.send_unicast(src, ack_frame, ack_frame_len);
+}
+
+void service_espnow() {
+  uint8_t src[6];
+  uint8_t buf[PULSELINK_FRAME_HEADER_SIZE + PULSELINK_MAX_FRAME_PAYLOAD];
+  uint8_t len;
+
+  while (g_espnow.receive(src, buf, &len)) {
+    pulselink::FrameHeader header;
+    const uint8_t* payload = nullptr;
+    uint8_t payload_len = 0;
+    if (pulselink::decode_frame(buf, len, &header, &payload, &payload_len) !=
+        pulselink::FrameError::kOk) {
+      continue;  // foreign traffic or a corrupt frame — silently discard
+    }
+
+    switch (header.msg_type) {
+      case pulselink::MsgType::kJoinAck:
+        handle_join_ack(src, payload, payload_len);
+        break;
+      case pulselink::MsgType::kCmd:
+        handle_cmd(src, header, payload, payload_len);
+        break;
+      default:
+        break;  // DATA/JOIN_REQ/CMD_ACK/PING/PONG/NACK aren't expected here
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("esp_now_init failed");
+    return;
+  }
+  g_espnow.begin();
+
+  g_prefs.begin("pulselink", /*readOnly=*/false);
+  if (load_pairing()) {
+    Serial.printf("restored pairing, channel=%u\n", g_pairing.channel());
+  } else {
+    broadcast_join_request();
+  }
+}
+
+void loop() {
+  service_espnow();
+
+  if (!g_pairing.paired()) {
+    static uint32_t s_last_broadcast = 0;
+    uint32_t now = millis();
+    if (now - s_last_broadcast > kJoinRetryIntervalMs) {
+      s_last_broadcast = now;
+      broadcast_join_request();
+    }
+    return;
+  }
+
+  static uint32_t s_last_send = 0;
+  uint32_t now = millis();
+  if (now - s_last_send > kDataSendIntervalMs) {
+    s_last_send = now;
+    send_data();
+  }
+}
