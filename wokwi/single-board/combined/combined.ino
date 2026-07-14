@@ -35,6 +35,7 @@
 #include <PubSubClient.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <esp_system.h>
 
 #include "pl_cmd_status.h"
 #include "pl_cmdtable.h"
@@ -89,7 +90,7 @@ PubSubClient g_pubsub(g_wifi_client);
 pulselink::gateway::PubSubClientMqttClient g_mqtt(&g_pubsub);
 pulselink::LastSeenSeq g_uplink_dedupe[PULSELINK_MAX_NODES];
 pulselink::SeqLossTracker g_loss_tracker[PULSELINK_MAX_NODES];
-uint16_t g_next_cmd_id = 0;
+uint16_t g_next_cmd_id = 0;  // reseeded from esp_random() in setup() (D-016)
 
 // --- Node-side state (same roles as node/node.ino) ---
 pulselink::NodePairingState g_pairing;
@@ -185,9 +186,10 @@ void gw_handle_join_req(const uint8_t src[6], const uint8_t* payload,
     return;  // bad token, rate-limited, or registry full — stay silent
   }
 
-  uint8_t ack_payload[2];
+  uint8_t ack_payload[2 + PULSELINK_PROVISIONING_TOKEN_SIZE];
   uint8_t ack_payload_len = pulselink::encode_join_ack(ack, ack_payload);
-  uint8_t frame[PULSELINK_FRAME_HEADER_SIZE + 2];
+  uint8_t frame[PULSELINK_FRAME_HEADER_SIZE + 2 +
+                PULSELINK_PROVISIONING_TOKEN_SIZE];
   uint8_t frame_len = 0;
   pulselink::encode_frame(pulselink::MsgType::kJoinAck, 0, 0, ack_payload,
                            ack_payload_len, frame, &frame_len);
@@ -195,6 +197,11 @@ void gw_handle_join_req(const uint8_t src[6], const uint8_t* payload,
 
   g_registry.set_field_name(ack.device_id, kFieldIdTemperatureC10,
                              "temperature");
+
+  // See gateway/gateway.ino's handle_join_req for why this reset matters.
+  g_uplink_dedupe[ack.device_id] = pulselink::LastSeenSeq();
+  g_loss_tracker[ack.device_id] = pulselink::SeqLossTracker();
+
   Serial.printf("gateway: joined device_id=%u\n", ack.device_id);
 }
 
@@ -442,7 +449,11 @@ void node_handle_join_ack(const uint8_t src[6], const uint8_t* payload,
                            uint8_t payload_len) {
   pulselink::JoinAckPayload ack;
   if (!pulselink::decode_join_ack(payload, payload_len, &ack)) return;
-  g_pairing.on_join_ack(src, ack.channel);
+  // Reject anything that doesn't echo our provisioning token, and refuse
+  // to re-pair if we're already paired (on_join_ack enforces the latter
+  // itself) — see JoinAckPayload's doc comment in pl_join.h (D-015).
+  if (!pulselink::join_ack_is_authentic(ack, kProvisioningToken)) return;
+  if (!g_pairing.on_join_ack(src, ack.channel)) return;
   node_save_pairing();
   Serial.printf("node: paired: device_id=%u channel=%u\n", ack.device_id,
                 ack.channel);
@@ -452,6 +463,14 @@ void node_handle_cmd(const uint8_t src[6], const pulselink::FrameHeader& header,
                       const uint8_t* payload, uint8_t payload_len) {
   (void)payload;
   (void)payload_len;
+
+  // Only the gateway we're actually paired with may command us (D-015) —
+  // ESP-NOW gives no other authentication, and without this check any
+  // radio on the channel could unicast a forged CMD and get it executed.
+  if (!g_pairing.paired() ||
+      !pulselink::mac_equal(src, g_pairing.gateway_mac())) {
+    return;
+  }
 
   pulselink::CmdResult result;
   if (g_cmd_dedupe.already_executed(header.cmd_id)) {

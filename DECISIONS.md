@@ -4,6 +4,54 @@ Append-only log. New entries at the top: date, decision, rationale, alternatives
 
 ---
 
+## 2026-07-14 — Post-Phase-4 hardening: JOIN_ACK authentication + CMD sender verification
+
+**D-015: `JoinAckPayload` (`core/pl_join.h`) now echoes the provisioning
+token back to the node, and `NodePairingState::on_join_ack()` refuses to
+re-pair a node that's already paired; nodes additionally verify the sender
+of every `CMD` frame is their paired gateway's MAC before executing it.**
+Found by an independent security review: as originally specified,
+JOIN_ACK carried only `device_id` + `channel` with no authentication at
+all — since ESP-NOW gives a receiver no way to verify a frame actually
+came from the radio it thinks it did, *any* frame shaped like a JOIN_ACK
+(broadcast or unicast) could re-point a node's gateway MAC to an attacker,
+and `handle_cmd` never checked that an inbound `CMD` came from the paired
+gateway at all, so a forged `CMD` from any radio on the channel would be
+executed and acked. The fix has two independent layers, deliberately not
+just one: (1) JOIN_ACK now must echo the same secret JOIN_REQ already
+required (`join_ack_is_authentic()`) — closes the "no token at all" gap
+for a mid-join attacker; (2) `on_join_ack()` itself refuses to mutate an
+already-paired node's state regardless of the token check's outcome — a
+legitimate node only ever expects a JOIN_ACK while unpaired, so this alone
+closes the more severe "hijack an already-working node" case even if a
+token ever leaked. `handle_cmd`'s MAC check (`node/node.ino`,
+`wokwi/single-board/combined/combined.ino`,
+`examples/part3-pairing/node_join`'s equivalent doesn't execute commands,
+only pairing) is the same principle applied to the command path.
+*Rejected:* leaving this for a later "real crypto" pass (LMK encryption is
+explicitly out of scope, CLAUDE.md, but *authentication* of which MAC a
+node trusts as its gateway doesn't require encryption and was simply
+missing — no reason to ship known-hijackable reference firmware in the
+meantime). *Also rejected:* per-message nonces/replay windows beyond
+this — diminishing returns for a tutorial-scale fleet already bounded by a
+shared provisioning token (see the token-size caveat in `pl_config.h`).
+
+**D-016: Gateway's `g_next_cmd_id` counter is seeded from `esp_random()` at
+boot, not a fixed `0`.** Found by the same review: the command table is
+intentionally RAM-only (D-006 — gateway reboot drops in-flight commands),
+but a node's `NodeCmdDedupe` (`core/pl_cmdtable.h`) only remembers a
+single last-executed `cmd_id` and *does* survive a gateway reboot (it's
+node-local, node reboot only). Restarting the counter at `0` every gateway
+boot meant a post-reboot `cmd_id` could collide with a value a node still
+had cached from before the reboot, making a genuinely new command look
+like a duplicate and get silently re-acked instead of executed — a real
+violation of PRD FR-8's "effectively exactly-once execution" with no
+error signal anywhere. *Rejected:* persisting the counter to NVS —
+that's the exact flash-wear-for-marginal-benefit trade D-006 already
+declined for the whole command table; a random seed closes the practical
+collision risk (1-in-65536 per reboot, and only against a value the node
+happens to still have cached) without reopening that decision.
+
 ## 2026-07-10 — Phase 4: EspNowTransport synchronizes ESP-NOW's async MAC-ack
 
 **D-014: `transport/espnow/pl_espnow_transport.h`'s `send_unicast()` blocks

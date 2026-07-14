@@ -78,6 +78,34 @@ unit-testable, and the only way to catch it is exactly what happened here
 `handle_join_req()` now calls `g_registry.set_field_name(ack.device_id,
 kFieldIdTemperatureC10, "temperature")` right after a successful join.
 
+## Two security bugs + two correctness bugs, from an independent review (2026-07-14)
+
+`combined.ino` is a from-scratch rewrite of `gateway.ino` + `node.ino`'s
+logic, not a copy — so it needed every one of these fixes applied
+separately, same as the field-mapping bug above:
+
+- **JOIN_ACK had no authentication** — any frame shaped like one could
+  hijack a node's gateway MAC, including already-paired nodes via a single
+  broadcast frame. Fixed with a token echo + refusing to re-pair an
+  already-paired node (D-015, DECISIONS.md).
+- **`node_handle_cmd` executed CMD frames from any sender** — fixed with a
+  `mac_equal()` check against the paired gateway before doing anything
+  else (D-015).
+- **`g_next_cmd_id` restarted at 0 every boot**, risking a false dedupe
+  hit against a node's cached last-executed `cmd_id` after a reboot —
+  seeded from `esp_random()` instead (D-016).
+- **`g_uplink_dedupe`/`g_loss_tracker` weren't reset on rejoin**,
+  permanently corrupting a rejoined node's `loss_rate` after any reboot —
+  both reset in `gw_handle_join_req()` now.
+
+See `gateway/README.md` and `node/README.md` for the fuller writeups (the
+underlying logic is identical; only the transport and the `gw_`/`node_`
+naming differ here). `core/pl_fields.h`'s `FieldReader` also picked up a
+fix in the same pass — an unrecognized field-type byte is now rejected
+instead of silently desyncing the rest of the payload — which this
+project inherits automatically since its headers are generated from
+`core/` by `sync.py`, not hand-copied.
+
 ## Config: why a public broker, not your local Mosquitto
 
 Wokwi's simulator runs in the cloud; your Mosquitto container is on your

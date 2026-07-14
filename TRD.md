@@ -35,14 +35,14 @@ Header is serialized **field-by-field** (no raw packed-struct casts across the w
 | 6 | 1 | payload_len | Explicit; truncated frames are detectable |
 | 7 | ≤243 | payload | Structa-packed body |
 
-Deliberately absent from the frame: sender MAC (provided out-of-band by the RX callback) and tenant/device identity (resolved gateway-side via registry; keeps identity un-spoofable at this layer).
+Deliberately absent from the frame: sender MAC (provided out-of-band by the RX callback) and tenant/device identity (resolved gateway-side via registry). This keeps device identity out of attacker-controlled payload bytes, but it is *not* a spoofing defense on its own — the MAC itself is still just a radio-reported address, forgeable by any ESP32 that sets its own MAC before `esp_now_init()`. The real trust boundary is the shared provisioning token (§5.1, D-015): a MAC-spoofing attacker who also has the token can still impersonate a node's uplink. LMK-level protection against that is explicitly out of scope (CLAUDE.md).
 
 ### 3.2 Message types
 
 | Type | Direction | Purpose |
 |---|---|---|
 | `JOIN_REQ` | node → broadcast | Discovery + pairing; carries provisioning token. The only legitimate broadcast frame. |
-| `JOIN_ACK` | gateway → node | Assigned/confirmed device_id + current channel |
+| `JOIN_ACK` | gateway → node | Assigned/confirmed device_id + current channel + the provisioning token echoed back (authenticity check, D-015 — a node refuses to trust a JOIN_ACK, and refuses to re-pair at all once already paired, unless the token matches) |
 | `DATA` | node → gateway | Telemetry (self-describing fields, §3.3) |
 | `CMD` | gateway → node | Downlink command; carries cmd_id |
 | `CMD_ACK` | node → gateway | App-level ack; cmd_id + result code (§3.4) |
@@ -132,7 +132,7 @@ Key invariant: **nodes must not care that the backhaul died.** The Connected/Deg
 
 ### 5.3 Command dedupe
 
-Node stores last-executed cmd_id; a retried CMD with the same id is re-acked but not re-executed.
+Node stores last-executed cmd_id; a retried CMD with the same id is re-acked but not re-executed. Before any of that: a node only accepts a CMD frame from its paired gateway's MAC (D-015) — ESP-NOW has no other sender authentication, so skipping this check would let any radio on the channel command the node directly.
 
 ## 6. Memory budget (WROOM-class gateway, rough)
 

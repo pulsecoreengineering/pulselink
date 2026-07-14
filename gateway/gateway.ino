@@ -23,6 +23,7 @@
 #include <Preferences.h>
 #include <WiFi.h>
 #include <esp_now.h>
+#include <esp_system.h>
 #include <esp_wifi.h>
 
 #include "../core/pl_cmd_status.h"
@@ -77,6 +78,13 @@ pulselink::LastSeenSeq g_uplink_dedupe[PULSELINK_MAX_NODES];
 pulselink::SeqLossTracker g_loss_tracker[PULSELINK_MAX_NODES];
 
 uint8_t g_gateway_channel = 0;
+// Seeded from esp_random() in setup(), not 0 — the command table is RAM-only
+// by design (D-006: gateway reboot drops in-flight commands) and a node's
+// dedupe cache (core/pl_cmdtable.h's NodeCmdDedupe) only survives a node
+// reboot, not a gateway one. Starting this counter at a fixed 0 every
+// gateway boot means a post-reboot cmd_id can collide with a value the same
+// node already has cached as its last-executed command, making a genuinely
+// new command look like a duplicate and get silently skipped (D-016).
 uint16_t g_next_cmd_id = 0;
 
 // Ticks are seconds throughout this file — matches how PULSELINK_MAX_*
@@ -172,9 +180,10 @@ void handle_join_req(const uint8_t src[6], const uint8_t* payload,
     return;  // bad token, rate-limited, or registry full — stay silent
   }
 
-  uint8_t ack_payload[2];
+  uint8_t ack_payload[2 + PULSELINK_PROVISIONING_TOKEN_SIZE];
   uint8_t ack_payload_len = pulselink::encode_join_ack(ack, ack_payload);
-  uint8_t frame[PULSELINK_FRAME_HEADER_SIZE + 2];
+  uint8_t frame[PULSELINK_FRAME_HEADER_SIZE + 2 +
+                PULSELINK_PROVISIONING_TOKEN_SIZE];
   uint8_t frame_len = 0;
   pulselink::encode_frame(pulselink::MsgType::kJoinAck, 0, 0, ack_payload,
                            ack_payload_len, frame, &frame_len);
@@ -182,6 +191,16 @@ void handle_join_req(const uint8_t src[6], const uint8_t* payload,
 
   g_registry.set_field_name(ack.device_id, kFieldIdTemperatureC10,
                              "temperature");
+
+  // A rejoin (same MAC, same device_id slot) means the node's own uplink
+  // seq counter just restarted at 0 too — plain RAM state on the node,
+  // never persisted (node/node.ino). Without this reset, the stale
+  // last-seen seq from before the reboot makes the next frame look like a
+  // huge sequence gap, permanently inflating this device's published
+  // loss_rate for the rest of its uptime.
+  g_uplink_dedupe[ack.device_id] = pulselink::LastSeenSeq();
+  g_loss_tracker[ack.device_id] = pulselink::SeqLossTracker();
+
   Serial.printf("joined device_id=%u\n", ack.device_id);
 }
 
@@ -400,6 +419,10 @@ void setup() {
   // doc comment explains why this hazard exists).
   g_prefs.begin("pulselink", /*readOnly=*/false);
   g_registry.reload();
+
+  // D-016 (DECISIONS.md): random, not 0, so a post-reboot cmd_id can't
+  // collide with a value a node still has cached as its last-executed one.
+  g_next_cmd_id = static_cast<uint16_t>(esp_random());
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(kWifiSsid, kWifiPassword);

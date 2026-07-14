@@ -33,5 +33,33 @@ piece of logic this file calls is covered by host-native tests against
 zero warnings) against stub Arduino/ESP-NOW headers, not compiled against
 the real ESP32 Arduino core.
 
-See `wokwi/gateway-node/` for a flattened copy of this file (plus
-`gateway.ino`) set up to run both boards together in the Wokwi simulator.
+See `wokwi/single-board/combined/` for a version of this logic (merged
+with the gateway side) that actually runs in the Wokwi simulator — Wokwi
+doesn't support different firmware on multiple boards in one project, so
+there's no standalone two-board Wokwi project for this file.
+
+## Two security bugs an independent review caught here (2026-07-14)
+
+Neither is hypothetical — both are exploitable by anything else on the
+same channel, no special access required:
+
+1. **JOIN_ACK had no authentication at all.** `handle_join_ack()` accepted
+   *any* frame shaped like a JOIN_ACK and unconditionally re-pointed
+   `gateway_mac_` at whoever sent it — including a broadcast frame, which
+   would hijack every node in range simultaneously, even ones already
+   working. Fixed two ways at once (D-015, DECISIONS.md): JOIN_ACK now
+   echoes the provisioning token, checked with `join_ack_is_authentic()`
+   before anything else runs; and `NodePairingState::on_join_ack()` now
+   refuses to re-pair a node that's already paired, full stop, regardless
+   of the token check — a legitimate node only ever expects a JOIN_ACK
+   while unpaired in the first place.
+2. **`handle_cmd()` executed any CMD frame without checking who sent it.**
+   `src` was only used to address the reply, never compared against the
+   node's paired gateway MAC — so any radio on the channel could unicast a
+   forged CMD and get it executed and acked as if from the real gateway.
+   Fixed with one `mac_equal()` check before anything else in the handler
+   runs.
+
+Both are in `handle_cmd`/`handle_join_ack` above — read them alongside
+this note rather than trusting the summary; the actual checks are a few
+lines each.

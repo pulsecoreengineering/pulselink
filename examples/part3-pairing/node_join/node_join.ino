@@ -79,7 +79,12 @@ void on_recv(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
   pulselink::JoinAckPayload ack;
   if (!pulselink::decode_join_ack(payload, payload_len, &ack)) return;
 
-  g_pairing.on_join_ack(info->src_addr, ack.channel);
+  // Reject anything that doesn't echo our provisioning token, and refuse
+  // to re-pair if we're already paired (on_join_ack enforces the latter
+  // itself) — see JoinAckPayload's doc comment in pl_join.h (D-015). ESP-NOW
+  // gives a node no other way to tell a genuine reply from a forged one.
+  if (!pulselink::join_ack_is_authentic(ack, kProvisioningToken)) return;
+  if (!g_pairing.on_join_ack(info->src_addr, ack.channel)) return;
   save_pairing_to_nvs();
 }
 

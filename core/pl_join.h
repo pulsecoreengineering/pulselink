@@ -37,22 +37,46 @@ inline bool decode_join_request(const uint8_t* buf, uint8_t len,
   return true;
 }
 
+// `token` echoes the gateway's provisioning token back to the node. Unlike
+// JOIN_REQ, ESP-NOW's link layer gives a node no way to tell whether a
+// received frame actually came from a radio that heard its broadcast, or
+// from any other radio on the channel shaped like a reply (see D-015,
+// DECISIONS.md) — so JOIN_ACK carries the same secret JOIN_REQ required,
+// letting the node confirm this reply came from something that actually
+// knows the fleet's provisioning token before it trusts device_id/channel
+// and re-points its unicast peer at `src`.
 struct JoinAckPayload {
   uint8_t device_id;
   uint8_t channel;
+  uint8_t token[PULSELINK_PROVISIONING_TOKEN_SIZE];
 };
 
 inline uint8_t encode_join_ack(const JoinAckPayload& p, uint8_t* out) {
   out[0] = p.device_id;
   out[1] = p.channel;
-  return 2;
+  memcpy(out + 2, p.token, PULSELINK_PROVISIONING_TOKEN_SIZE);
+  return 2 + PULSELINK_PROVISIONING_TOKEN_SIZE;
 }
 
 inline bool decode_join_ack(const uint8_t* buf, uint8_t len,
                              JoinAckPayload* out) {
-  if (len != 2) return false;
+  if (len != 2 + PULSELINK_PROVISIONING_TOKEN_SIZE) return false;
   out->device_id = buf[0];
   out->channel = buf[1];
+  memcpy(out->token, buf + 2, PULSELINK_PROVISIONING_TOKEN_SIZE);
+  return true;
+}
+
+// Node-side authenticity check: does a received JOIN_ACK's token echo match
+// what this node was provisioned with? Callers must check this — and that
+// the node isn't already paired (NodePairingState::on_join_ack enforces the
+// latter) — before trusting a JOIN_ACK's device_id/channel at all.
+inline bool join_ack_is_authentic(
+    const JoinAckPayload& ack,
+    const uint8_t expected_token[PULSELINK_PROVISIONING_TOKEN_SIZE]) {
+  for (uint8_t i = 0; i < PULSELINK_PROVISIONING_TOKEN_SIZE; ++i) {
+    if (ack.token[i] != expected_token[i]) return false;
+  }
   return true;
 }
 
@@ -70,11 +94,23 @@ class NodePairingState {
   const uint8_t* gateway_mac() const { return gateway_mac_; }
   uint8_t channel() const { return channel_; }
 
-  void on_join_ack(const uint8_t gateway_mac[6], uint8_t channel) {
+  // Returns false (state unchanged) if this node is already paired. A
+  // legitimate node only ever broadcasts JOIN_REQ — and therefore only
+  // expects a JOIN_ACK — while unpaired (fresh boot, or after
+  // on_send_result() triggers re-discovery); an inbound JOIN_ACK arriving
+  // while already paired is either a stale retransmit of the one already
+  // acted on, or a forged frame attempting to re-point an already-working
+  // pairing at a different MAC, and neither should be allowed to mutate
+  // state. See JoinAckPayload's doc comment for the companion token check
+  // callers should also apply before this — this refusal holds regardless
+  // of whether that check even ran.
+  bool on_join_ack(const uint8_t gateway_mac[6], uint8_t channel) {
+    if (paired_) return false;
     paired_ = true;
     memcpy(gateway_mac_, gateway_mac, 6);
     channel_ = channel;
     consecutive_failures_ = 0;
+    return true;
   }
 
   // Feed the result of every unicast send attempt. Returns true exactly
@@ -214,6 +250,7 @@ class GatewayJoinHandler {
 
     out_ack->device_id = static_cast<uint8_t>(device_id);
     out_ack->channel = gateway_channel;
+    memcpy(out_ack->token, expected_token_, PULSELINK_PROVISIONING_TOKEN_SIZE);
     return true;
   }
 

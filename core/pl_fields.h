@@ -43,6 +43,25 @@ inline uint8_t field_type_size(FieldType type) {
   return 0;
 }
 
+// True for every type tag this build actually knows how to decode. A wire
+// byte outside this set is corruption (bit-flip, foreign traffic, version
+// skew), not a valid zero-size field — callers must reject it rather than
+// silently treating it as a zero-length tuple, or the reader loses byte
+// alignment with every field after it.
+inline bool field_type_known(FieldType type) {
+  switch (type) {
+    case FieldType::kU8:
+    case FieldType::kBool:
+    case FieldType::kU16:
+    case FieldType::kI16:
+    case FieldType::kU32:
+    case FieldType::kI32:
+    case FieldType::kF32:
+      return true;
+  }
+  return false;
+}
+
 struct FieldValue {
   uint8_t field_id;
   FieldType type;
@@ -145,6 +164,7 @@ class FieldReader {
 
     uint8_t field_id = buf_[pos_];
     FieldType type = static_cast<FieldType>(buf_[pos_ + 1]);
+    if (!field_type_known(type)) return false;
     uint8_t size = field_type_size(type);
     if (static_cast<uint16_t>(pos_) + 2 + size > len_) return false;
 

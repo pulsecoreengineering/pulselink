@@ -40,5 +40,21 @@ Both `.ino` files also syntax-check clean with `g++ -fsyntax-only` against
 stub Arduino/ESP-NOW headers (see `gateway/README.md` for what that does
 and doesn't prove).
 
+**Updated 2026-07-14 (D-015, DECISIONS.md):** an independent security
+review found that JOIN_ACK originally carried no authentication at all —
+`node_join.ino` accepted any frame shaped like a JOIN_ACK and re-pointed
+its gateway MAC at whoever sent it. `JoinAckPayload` now echoes the
+provisioning token; `node_join.ino`'s `on_recv` checks it with
+`join_ack_is_authentic()` before trusting anything in the frame, and
+`NodePairingState::on_join_ack()` itself now refuses to re-pair a node
+that's already paired. `host_demo.cpp`'s channel-change simulation had to
+change too: it used to fake "the router moved" by calling `on_join_ack()`
+a second time on an already-paired `NodePairingState`, which the new
+refusal now blocks (correctly — that's the whole point). It's rebuilt via
+`serialize()`/`deserialize()` instead, modeling "the node reboots and
+loads a stale pairing from its own flash" rather than a second inbound
+JOIN_ACK, which is a real and different thing from the node's own trust
+model's point of view.
+
 Article artifact — keep it minimal and readable, it appears in print
 (CLAUDE.md).

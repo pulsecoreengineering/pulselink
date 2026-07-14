@@ -74,3 +74,27 @@ been published to MQTT — see `wokwi/single-board/README.md` for the story.
 Fixed here too. Worth remembering: orchestration glue like this file isn't
 unit-testable, so re-reading it end to end (or writing a sibling copy, as
 happened here) is sometimes the only way a bug like that surfaces.
+
+## Two more bugs, this time from an independent review (2026-07-14)
+
+Both fixed here and in `wokwi/single-board/combined/combined.ino`:
+
+- **`g_uplink_dedupe`/`g_loss_tracker` weren't reset on rejoin.** Both are
+  indexed by `device_id`, which a rejoining node gets back unchanged (same
+  MAC, same registry slot) — but the node's own `seq` counter is plain RAM
+  with no NVS persistence (`node/node.ino`), so a node reboot restarts it
+  at 0 while the gateway's tracker still remembers a `last_seq_` from
+  before the reboot. That one-time "gap" got counted as real loss and,
+  since `loss_rate_percent()` is a lifetime cumulative ratio with no decay,
+  permanently inflated that device's published `loss_rate` for the rest of
+  its uptime. Fixed in `handle_join_req()`: both trackers are reset to
+  fresh instances on every successful join, first or repeat.
+- **The command downlink trusted any sender.** See `node/README.md`'s
+  security section — this file's half of that fix is D-015's JOIN_ACK
+  token echo (`handle_join_req` fills it from the already-validated
+  token) and D-016's random `cmd_id` seed (`esp_random()` at boot instead
+  of a fixed `0`, so a post-reboot `cmd_id` can't collide with a value a
+  node still has cached as its last-executed one and get silently
+  skipped instead of run).
+
+See `DECISIONS.md` D-015/D-016 for the full rationale on both.

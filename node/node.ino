@@ -118,7 +118,11 @@ void handle_join_ack(const uint8_t src[6], const uint8_t* payload,
                       uint8_t payload_len) {
   pulselink::JoinAckPayload ack;
   if (!pulselink::decode_join_ack(payload, payload_len, &ack)) return;
-  g_pairing.on_join_ack(src, ack.channel);
+  // Reject anything that doesn't echo our provisioning token, and refuse
+  // to re-pair if we're already paired (on_join_ack enforces the latter
+  // itself) — see JoinAckPayload's doc comment in pl_join.h (D-015).
+  if (!pulselink::join_ack_is_authentic(ack, kProvisioningToken)) return;
+  if (!g_pairing.on_join_ack(src, ack.channel)) return;
   save_pairing();
   Serial.printf("paired: device_id=%u channel=%u\n", ack.device_id,
                 ack.channel);
@@ -128,6 +132,14 @@ void handle_cmd(const uint8_t src[6], const pulselink::FrameHeader& header,
                  const uint8_t* payload, uint8_t payload_len) {
   (void)payload;
   (void)payload_len;
+
+  // Only the gateway we're actually paired with may command us (D-015) —
+  // ESP-NOW gives no other authentication, and without this check any
+  // radio on the channel could unicast a forged CMD and get it executed.
+  if (!g_pairing.paired() ||
+      !pulselink::mac_equal(src, g_pairing.gateway_mac())) {
+    return;
+  }
 
   pulselink::CmdResult result;
   if (g_cmd_dedupe.already_executed(header.cmd_id)) {

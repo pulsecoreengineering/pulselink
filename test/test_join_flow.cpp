@@ -80,9 +80,10 @@ void service_join_requests(FakeTransport* gateway, GatewayJoinHandler* handler,
       continue;  // silently ignored: bad token, rate-limited, or full
     }
 
-    uint8_t ack_payload[2];
+    uint8_t ack_payload[2 + PULSELINK_PROVISIONING_TOKEN_SIZE];
     uint8_t ack_payload_len = encode_join_ack(ack, ack_payload);
-    uint8_t ack_frame[PULSELINK_FRAME_HEADER_SIZE + 2];
+    uint8_t ack_frame[PULSELINK_FRAME_HEADER_SIZE + 2 +
+                       PULSELINK_PROVISIONING_TOKEN_SIZE];
     uint8_t ack_frame_len = 0;
     encode_frame(MsgType::kJoinAck, 0, 0, ack_payload, ack_payload_len,
                  ack_frame, &ack_frame_len);
@@ -106,6 +107,8 @@ PL_TEST_CASE(fresh_join_succeeds_end_to_end_over_fake_transport) {
   JoinAckPayload ack;
   PL_ASSERT(receive_join_ack(&node, &ack));
   PL_ASSERT(ack.channel == kGatewayChannel);
+  PL_ASSERT(memcmp(ack.token, kToken, sizeof(kToken)) == 0);
+  PL_ASSERT(join_ack_is_authentic(ack, kToken));
   PL_ASSERT(registry.size() == 1);
 }
 

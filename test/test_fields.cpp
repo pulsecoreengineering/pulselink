@@ -71,3 +71,13 @@ PL_TEST_CASE(field_reader_rejects_truncated_tuple) {
   FieldValue f;
   PL_ASSERT(!r.next(&f));
 }
+
+PL_TEST_CASE(field_reader_rejects_unknown_type_tag_instead_of_desyncing) {
+  // Byte 99 isn't a valid FieldType. A reader that mistook this for a
+  // zero-size field would return true, leave `f` half-populated, and then
+  // misparse every subsequent tuple at the wrong offset.
+  uint8_t buf[6] = {1, 99, 2, static_cast<uint8_t>(FieldType::kU8), 0, 42};
+  FieldReader r(buf, sizeof(buf));
+  FieldValue f;
+  PL_ASSERT(!r.next(&f));
+}

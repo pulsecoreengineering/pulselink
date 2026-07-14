@@ -71,9 +71,10 @@ void loop() {
     peer.encrypt = false;
     esp_now_add_peer(&peer);
 
-    uint8_t ack_payload[2];
+    uint8_t ack_payload[2 + PULSELINK_PROVISIONING_TOKEN_SIZE];
     uint8_t ack_payload_len = pulselink::encode_join_ack(ack, ack_payload);
-    uint8_t ack_frame[PULSELINK_FRAME_HEADER_SIZE + 2];
+    uint8_t ack_frame[PULSELINK_FRAME_HEADER_SIZE + 2 +
+                       PULSELINK_PROVISIONING_TOKEN_SIZE];
     uint8_t ack_frame_len = 0;
     pulselink::encode_frame(pulselink::MsgType::kJoinAck, 0, 0, ack_payload,
                              ack_payload_len, ack_frame, &ack_frame_len);

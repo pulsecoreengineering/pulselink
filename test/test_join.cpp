@@ -34,15 +34,22 @@ PL_TEST_CASE(join_request_wrong_length_is_rejected) {
 }
 
 PL_TEST_CASE(join_ack_round_trips) {
-  JoinAckPayload ack{7, 11};
+  JoinAckPayload ack{7, 11, {0xDE, 0xAD, 0xBE, 0xEF}};
   uint8_t buf[16];
   uint8_t len = encode_join_ack(ack, buf);
-  PL_ASSERT(len == 2);
+  PL_ASSERT(len == 2 + PULSELINK_PROVISIONING_TOKEN_SIZE);
 
   JoinAckPayload out;
   PL_ASSERT(decode_join_ack(buf, len, &out));
   PL_ASSERT(out.device_id == 7);
   PL_ASSERT(out.channel == 11);
+  PL_ASSERT(memcmp(out.token, ack.token, sizeof(ack.token)) == 0);
+}
+
+PL_TEST_CASE(join_ack_wrong_length_is_rejected) {
+  uint8_t buf[2] = {7, 11};  // missing the token entirely
+  JoinAckPayload out;
+  PL_ASSERT(!decode_join_ack(buf, sizeof(buf), &out));
 }
 
 PL_TEST_CASE(fresh_node_pairing_state_is_unpaired) {
@@ -52,10 +59,31 @@ PL_TEST_CASE(fresh_node_pairing_state_is_unpaired) {
 
 PL_TEST_CASE(join_ack_transitions_to_paired) {
   NodePairingState state;
-  state.on_join_ack(kGatewayMac, 6);
+  PL_ASSERT(state.on_join_ack(kGatewayMac, 6));
   PL_ASSERT(state.paired());
   PL_ASSERT(state.channel() == 6);
   PL_ASSERT(memcmp(state.gateway_mac(), kGatewayMac, 6) == 0);
+}
+
+PL_TEST_CASE(join_ack_while_already_paired_is_refused_and_state_unchanged) {
+  NodePairingState state;
+  state.on_join_ack(kGatewayMac, 6);
+
+  const uint8_t kAttackerMac[6] = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x02};
+  PL_ASSERT(!state.on_join_ack(kAttackerMac, 9));  // refused, not re-pointed
+
+  PL_ASSERT(state.paired());
+  PL_ASSERT(state.channel() == 6);  // unchanged
+  PL_ASSERT(memcmp(state.gateway_mac(), kGatewayMac, 6) == 0);  // unchanged
+}
+
+PL_TEST_CASE(join_ack_authenticity_check_matches_and_rejects_correctly) {
+  const uint8_t kExpected[PULSELINK_PROVISIONING_TOKEN_SIZE] = {1, 2, 3, 4};
+  JoinAckPayload good{7, 11, {1, 2, 3, 4}};
+  JoinAckPayload forged{7, 11, {9, 9, 9, 9}};
+
+  PL_ASSERT(join_ack_is_authentic(good, kExpected));
+  PL_ASSERT(!join_ack_is_authentic(forged, kExpected));
 }
 
 PL_TEST_CASE(consecutive_failures_below_threshold_do_not_trigger_rediscovery) {

@@ -56,9 +56,10 @@ static void service_gateway(FakeTransport* gateway, GatewayJoinHandler* handler,
       continue;
     }
 
-    uint8_t ack_payload[2];
+    uint8_t ack_payload[2 + PULSELINK_PROVISIONING_TOKEN_SIZE];
     uint8_t ack_payload_len = encode_join_ack(ack, ack_payload);
-    uint8_t ack_frame[PULSELINK_FRAME_HEADER_SIZE + 2];
+    uint8_t ack_frame[PULSELINK_FRAME_HEADER_SIZE + 2 +
+                       PULSELINK_PROVISIONING_TOKEN_SIZE];
     uint8_t ack_frame_len = 0;
     encode_frame(MsgType::kJoinAck, 0, 0, ack_payload, ack_payload_len,
                  ack_frame, &ack_frame_len);
@@ -99,7 +100,7 @@ int main() {
   broadcast_join_request(&node, 0);
   service_gateway(&gateway, &handler, /*now=*/0);
   JoinAckPayload ack;
-  if (receive_join_ack(&node, &ack)) {
+  if (receive_join_ack(&node, &ack) && join_ack_is_authentic(ack, kToken)) {
     pairing.on_join_ack(gateway_mac, ack.channel);
     printf("node: paired, device_id=%u channel=%u\n\n", ack.device_id,
            ack.channel);
@@ -108,9 +109,18 @@ int main() {
   printf("--- router changes channel; node's unicasts start failing ---\n");
   // Simulate the channel change by unicasting to a MAC that (from the
   // node's perspective) is unreachable — the real gateway's peer registration
-  // is now stale on the old channel.
+  // is now stale on the old channel. Built via serialize/deserialize rather
+  // than a second on_join_ack() call: on_join_ack() now refuses to re-pair
+  // an already-paired node (D-015, DECISIONS.md — it's the same guard that
+  // stops a forged JOIN_ACK from hijacking a working pairing), so this
+  // demo instead models "the node reboots and loads a stale record from
+  // its own flash," which is exactly what deserialize() is for.
   uint8_t stale_mac[6] = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01};
-  pairing.on_join_ack(stale_mac, pairing.channel());  // repoint at the stale peer
+  uint8_t stale_bytes[NodePairingState::kSerializedSize];
+  NodePairingState stale_seed;
+  stale_seed.on_join_ack(stale_mac, pairing.channel());
+  stale_seed.serialize(stale_bytes);
+  pairing.deserialize(stale_bytes);
   for (uint8_t i = 0; i < PULSELINK_MAX_UNICAST_FAILURES; ++i) {
     uint8_t dummy[1] = {0};
     bool acked = node.send_unicast(stale_mac, dummy, 1);
@@ -124,7 +134,7 @@ int main() {
   printf("--- node re-broadcasts JOIN_REQ and rejoins ---\n");
   broadcast_join_request(&node, 1);
   service_gateway(&gateway, &handler, /*now=*/100);
-  if (receive_join_ack(&node, &ack)) {
+  if (receive_join_ack(&node, &ack) && join_ack_is_authentic(ack, kToken)) {
     pairing.on_join_ack(gateway_mac, ack.channel);
     printf("node: paired, device_id=%u channel=%u\n", ack.device_id,
            ack.channel);
