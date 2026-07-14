@@ -26,6 +26,16 @@
 #include <esp_system.h>
 #include <esp_wifi.h>
 
+// TLS is optional (TRD.md §6: the dominant heap cost if enabled, ~40 KB+
+// during the handshake) — off by default so this fits the WROOM memory
+// budget without readers needing to think about it. Flip to 1 once the
+// broker is genuinely internet-facing rather than on your LAN; username/
+// password auth below is independent of this and worth setting either way.
+#define PULSELINK_MQTT_TLS 0
+#if PULSELINK_MQTT_TLS
+#include <WiFiClientSecure.h>
+#endif
+
 #include "../core/pl_cmd_status.h"
 #include "../core/pl_cmdtable.h"
 #include "../core/pl_dedupe.h"
@@ -45,6 +55,22 @@ static const char* kWifiSsid = "YOUR_WIFI_SSID";
 static const char* kWifiPassword = "YOUR_WIFI_PASSWORD";
 static const char* kMqttHost = "192.168.1.10";
 static const int kMqttPort = 1883;
+static const char* kMqttClientId = "pulselink-gateway";
+// Empty username = anonymous connect (fine for a LAN-only broker with no
+// other clients you don't trust). Set both once the broker is reachable
+// from anywhere it wasn't before — a port-forward, a cloud-hosted broker,
+// anything beyond your own LAN (D-017, DECISIONS.md).
+static const char* kMqttUsername = "";
+static const char* kMqttPassword = "";
+#if PULSELINK_MQTT_TLS
+// Broker's CA certificate, PEM format. Left empty, setup() falls back to
+// setInsecure() — skips certificate validation entirely. That's fine for
+// a quick test against a broker you already trust the address of; it is
+// not fine for anything actually exposed to the open internet, where a
+// missing cert check means username/password go out over a connection
+// that could be silently intercepted.
+static const char* kMqttCaCert = "";
+#endif
 static const char kTenantId[] = "acme";
 static const uint8_t kProvisioningToken[PULSELINK_PROVISIONING_TOKEN_SIZE] = {
     1, 2, 3, 4};
@@ -68,7 +94,11 @@ pulselink::CmdTable g_cmd_table;
 pulselink::GatewayHsm g_hsm;
 
 pulselink::espnow::EspNowTransport g_espnow;
+#if PULSELINK_MQTT_TLS
+WiFiClientSecure g_wifi_client;
+#else
 WiFiClient g_wifi_client;
+#endif
 PubSubClient g_pubsub(g_wifi_client);
 pulselink::gateway::PubSubClientMqttClient g_mqtt(&g_pubsub);
 
@@ -400,7 +430,14 @@ void service_health_metrics() {
 }
 
 void connect_mqtt() {
-  if (!g_pubsub.connect("pulselink-gateway")) return;
+  // Empty username = anonymous connect, matching a LAN-only broker with
+  // AllowAnonymous. PubSubClient::connect() has a separate overload per
+  // arg count, not default args, so which one gets called depends on
+  // whether credentials are actually configured (D-017, DECISIONS.md).
+  bool ok = (kMqttUsername[0] != '\0')
+                ? g_pubsub.connect(kMqttClientId, kMqttUsername, kMqttPassword)
+                : g_pubsub.connect(kMqttClientId);
+  if (!ok) return;
 
   g_hsm.on_backhaul_up();
   char wildcard[PULSELINK_MAX_TOPIC_LEN];
@@ -439,6 +476,17 @@ void setup() {
   }
   g_espnow.begin();
 
+#if PULSELINK_MQTT_TLS
+  if (kMqttCaCert[0] != '\0') {
+    g_wifi_client.setCACert(kMqttCaCert);
+  } else {
+    Serial.println(
+        "WARNING: PULSELINK_MQTT_TLS is on with no CA cert set — falling "
+        "back to setInsecure() (no certificate validation). Fine for "
+        "testing, not for an internet-facing broker.");
+    g_wifi_client.setInsecure();
+  }
+#endif
   g_pubsub.setServer(kMqttHost, kMqttPort);
   connect_mqtt();
 }

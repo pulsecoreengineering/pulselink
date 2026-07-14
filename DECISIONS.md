@@ -4,6 +4,35 @@ Append-only log. New entries at the top: date, decision, rationale, alternatives
 
 ---
 
+## 2026-07-14 — Gateway MQTT auth + optional TLS
+
+**D-017: `gateway/gateway.ino` now supports MQTT username/password auth
+(always) and TLS (opt-in, `PULSELINK_MQTT_TLS` macro, default off).**
+Prompted by a direct question about remote access: PulseLink's only WAN
+reach is via the MQTT broker (TRD.md §1) — the gateway itself has no API
+and never accepts inbound connections — so the moment a broker becomes
+reachable from anywhere beyond the original LAN (port-forwarded, a
+cloud-hosted broker, anything not fully behind a VPN), an unauthenticated
+`connect()` is a real problem, not a theoretical one: this was flagged in
+the same review pass that found D-015/D-016 (`connect_mqtt()` previously
+passed only a client ID, no credentials at all, with no code-level nudge
+to add any — unlike the WiFi credentials right next to it, which
+`gateway/README.md` already called out as "edit before flashing"). Auth
+is unconditional (empty username = anonymous connect, an explicit choice
+not a default fallen into). TLS is a separate, off-by-default toggle:
+TRD.md §6 already documents it as "the dominant heap cost if enabled, ~40
+KB+ during the handshake" and optional by design, so wiring it up
+unconditionally would silently blow the WROOM memory budget the whole
+zero-heap-library design exists to protect; `PULSELINK_MQTT_TLS 1` swaps
+`WiFiClient` for `WiFiClientSecure` and either loads a CA cert or falls
+back to `setInsecure()` with a loud runtime warning, never silently.
+*Rejected:* making TLS the default — contradicts TRD.md §6's own framing
+of it as optional, and most readers' first deployment is a LAN broker
+where it buys nothing but heap pressure. *Rejected:* a "remote gateway
+management API" of any kind — CLAUDE.md's scope guards explicitly rule
+out a hosted/SaaS gateway; remote reach is the broker's job, by design,
+not the gateway's.
+
 ## 2026-07-14 — Post-Phase-4 hardening: JOIN_ACK authentication + CMD sender verification
 
 **D-015: `JoinAckPayload` (`core/pl_join.h`) now echoes the provisioning

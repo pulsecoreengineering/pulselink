@@ -31,6 +31,23 @@ topic tree unchanged.
 Edit the constants at the top of `gateway.ino` (WiFi SSID/password, MQTT
 host/port, tenant_id, provisioning token) before flashing.
 
+## Remote access: there is no gateway API, only the broker
+
+The gateway has no HTTP/REST/WebSocket server of its own and never
+accepts inbound connections — it's purely an MQTT client that dials out
+(TRD.md §1: all WAN reach is via MQTT). So "accessing the gateway
+remotely" really means "making the broker reachable from wherever you
+are" — a port-forward + TLS, a cloud-hosted broker, or a VPN back to your
+LAN, entirely outside PulseLink's scope (CLAUDE.md rules out a
+hosted/SaaS gateway by design).
+
+What *is* in scope, once the broker stops being LAN-only: `kMqttUsername`/
+`kMqttPassword` (empty = anonymous connect, fine for a trusted LAN broker)
+and an opt-in `PULSELINK_MQTT_TLS` toggle (off by default — TRD.md §6
+flags TLS as the dominant heap cost if enabled, ~40 KB+ during the
+handshake, so it stays a deliberate choice rather than the default). See
+D-017, DECISIONS.md, for the full reasoning.
+
 ## What's verified vs. what isn't
 
 Flagship article artifact for Part 4 (PRD.md §4.1). **Not compiled in this
@@ -40,7 +57,7 @@ verified:
 
 - Every piece of protocol/orchestration logic this file calls (registry,
   join handler, command table, dedupe, loss tracker, gateway HSM, topic
-  builder/parser) is covered by 126 host-native tests in `test/` against
+  builder/parser) is covered by 130 host-native tests in `test/` against
   `transport/fake/` — that's real coverage, not a claim.
 - `gateway.ino` itself was syntax-checked with `g++ -std=c++11 -Wall
   -Wextra -fsyntax-only` against hand-written stub headers standing in for

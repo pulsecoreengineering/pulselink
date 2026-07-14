@@ -57,6 +57,11 @@ static const char* kWifiPassword = "";
 static const char* kMqttHost =
     "test.mosquitto.org";  // public test broker — see README.md for why
 static const int kMqttPort = 1883;
+// Anonymous connect on purpose — test.mosquitto.org's plain 1883 listener
+// doesn't take credentials. gateway/gateway.ino has the real username/
+// password + optional-TLS config (D-017, DECISIONS.md) for an actual
+// deployment; this project stays on the public no-auth broker by design
+// (see this project's README for why).
 static const char kTenantId[] = "acme";
 static const uint8_t kProvisioningToken[PULSELINK_PROVISIONING_TOKEN_SIZE] = {
     1, 2, 3, 4};
